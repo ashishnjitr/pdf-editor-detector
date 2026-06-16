@@ -8,7 +8,6 @@ Original file is located at
 """
 
 # 1. Install the required PDF library into the cloud environment
-!pip install pypdf
 
 import pypdf
 import re
