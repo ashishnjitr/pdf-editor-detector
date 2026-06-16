@@ -63,7 +63,6 @@ for filename, file_bytes in uploaded.items():
     analyze_pdf(file_bytes)
 
 # 1. Install dependencies
-!pip install pypdf -q
 
 import io
 import re
