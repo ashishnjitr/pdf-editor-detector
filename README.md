@@ -10,7 +10,7 @@ An open-source, lightweight digital forensics tool built with Python to detect p
 Real-world PDF editors often leave behind digital "scars" when files are modified. This tool runs a multi-pass inspection to uncover hidden edit structures, timeline mismatches, and software signatures.
 
 ## 🚀 Live Demo
-[Insert your deployed Streamlit URL here, e.g., https://your-app.streamlit.app]
+(https://pdfbuster.streamlit.app/)
 
 ---
 
