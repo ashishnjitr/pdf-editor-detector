@@ -3,6 +3,8 @@ import pypdf
 import re
 import io
 from docx import Document
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 
 # 1. Page Configuration & Styling
@@ -108,54 +110,112 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             st.html(f'<div class="detail-block"><div class="detail-title">🔹 {finding["title"]}</div><div class="detail-text">{finding["text"]}</div></div>')
 
 # -------------------------------------------------------------
-# MODE B: TEMPLATE RESUME RE-FORMATTER UTILITY
+# MODE B: STANDARDIZED RESUME RE-FORMATTER UTILITY
 # -------------------------------------------------------------
 elif app_mode == "📄 Resume Re-Formatter":
-    st.subheader("Template-Driven Resume Re-Formatter")
-    st.markdown("Ensure compliance and brand uniformity by matching an exact styling format.")
+    st.subheader("Standardized Profile Formatting Engine")
+    st.markdown("Convert raw, unformatted candidate details into your exact reference profile format.")
     
-    # 1. Template Upload Section
-    st.write("##### 1. Establish Layout Standard")
-    template_file = st.file_uploader(
-        "Upload your blank Master Sample Resume format (.docx containing keys like [CANDIDATE_NAME] or [RESUME_BODY])", 
-        type=["docx"], 
-        key="template_upload"
-    )
-    
-    # 2. Raw Candidate File Upload Section
-    st.write("##### 2. Upload Targeted Candidate Data")
     uploaded_resume = st.file_uploader("Upload raw candidate profile (PDF or Word)", type=["pdf", "docx"], key="resume_upload")
     
-    def inject_into_template(template_bytes, candidate_text):
-        doc = Document(io.BytesIO(template_bytes))
+    def build_sample_aligned_format(candidate_text):
+        doc = Document()
         
+        # 1. Page Setup (Clean 1" Professional Margins)
+        for section in doc.sections:
+            section.top_margin = Inches(1)
+            section.bottom_margin = Inches(1)
+            section.left_margin = Inches(1)
+            section.right_margin = Inches(1)
+            
+        # 2. Reference Style Scheme (Clean Corporate Black/Charcoal)
+        COLOR_PRIMARY = RGBColor(0, 0, 0)         # Stark bold black headings
+        COLOR_BODY = RGBColor(40, 44, 52)         # Deep charcoal reader text
+        FONT_NAME = 'Calibri'                     # Matching sample font framework
+        
+        # Extract name and clean structural string segments
         lines = [line.strip() for line in candidate_text.split('\n') if line.strip()]
-        candidate_name = lines[0] if lines else "Candidate Profile"
-        full_body_text = "\n".join(lines[1:]) if len(lines) > 1 else "No text extracted."
+        candidate_name = lines[0] if lines else "CANDIDATE PROFILE"
         
-        for paragraph in doc.paragraphs:
-            if "[CANDIDATE_NAME]" in paragraph.text:
-                paragraph.text = paragraph.text.replace("[CANDIDATE_NAME]", candidate_name)
-            if "[RESUME_BODY]" in paragraph.text:
-                paragraph.text = paragraph.text.replace("[RESUME_BODY]", full_body_text)
-                
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        if "[CANDIDATE_NAME]" in paragraph.text:
-                            paragraph.text = paragraph.text.replace("[CANDIDATE_NAME]", candidate_name)
-                        if "[RESUME_BODY]" in paragraph.text:
-                            paragraph.text = paragraph.text.replace("[RESUME_BODY]", full_body_text)
+        # Structural Section Generator Helper
+        def add_sample_heading(title_text):
+            p_space = doc.add_paragraph()
+            p_space.paragraph_format.space_before = Pt(14)
+            p_space.paragraph_format.space_after = Pt(2)
+            
+            p_heading = doc.add_paragraph()
+            p_heading.paragraph_format.space_after = Pt(4)
+            p_heading.paragraph_format.keep_with_next = True
+            run_h = p_heading.add_run(title_text)
+            run_h.font.name = FONT_NAME
+            run_h.font.size = Pt(13)
+            run_h.bold = True
+            run_h.font.color.rgb = COLOR_PRIMARY
+            
+        # --- SAMPLE FORMAT HEADER LAYER ---
+        p_name = doc.add_paragraph()
+        p_name.paragraph_format.space_after = Pt(2)
+        run_name = p_name.add_run(candidate_name)
+        run_name.font.name = FONT_NAME
+        run_name.font.size = Pt(18)
+        run_name.bold = True
+        run_name.font.color.rgb = COLOR_PRIMARY
+        
+        # Metadata Sub-Header Layout (Email | LinkedIn Links)
+        p_links = doc.add_paragraph()
+        p_links.paragraph_format.space_after = Pt(12)
+        run_links = p_links.add_run("Email: contact@candidate.com  |  LinkedIn: linkedin.com/in/candidate")
+        run_links.font.name = FONT_NAME
+        run_links.font.size = Pt(10)
+        run_links.font.color.rgb = RGBColor(100, 110, 120)
+        
+        # --- SECTION 1: PROFESSIONAL SUMMARY ---
+        add_sample_heading("Professional Summary")
+        p_summary = doc.add_paragraph()
+        p_summary.paragraph_format.space_after = Pt(6)
+        p_summary.paragraph_format.line_spacing = 1.15
+        summary_base = "Results-driven professional with specialized capabilities across core execution platforms. Experienced in stakeholder alignment, cross-functional project management, and scalable workflows within high-stakes market sectors."
+        run_sum = p_summary.add_run(summary_base)
+        run_sum.font.name = FONT_NAME
+        run_sum.font.size = Pt(11)
+        run_sum.font.color.rgb = COLOR_BODY
 
+        # --- SECTION 2: SKILLS MATRIX ---
+        add_sample_heading("Skills")
+        p_skills = doc.add_paragraph()
+        p_skills.paragraph_format.space_after = Pt(6)
+        p_skills.paragraph_format.line_spacing = 1.15
+        skills_base = "Core Deliverables • Pipeline Management • Optimization Systems • Analytics Tracking • Cross-Functional Team Leadership"
+        run_skills = p_skills.add_run(skills_base)
+        run_skills.font.name = FONT_NAME
+        run_skills.font.size = Pt(11)
+        run_skills.font.color.rgb = COLOR_BODY
+
+        # --- SECTION 3: CHRONOLOGICAL EXPERIENCE ---
+        add_sample_heading("Professional Experience")
+        
+        # Loop first 50 content fragments cleanly into your bullet array format
+        body_source_lines = lines[1:50] if len(lines) > 1 else ["No additional performance parameters extracted."]
+        for line in body_source_lines:
+            p_bullet = doc.add_paragraph(style='List Bullet')
+            p_bullet.paragraph_format.space_after = Pt(3)
+            p_bullet.paragraph_format.line_spacing = 1.15
+            
+            run_b = p_bullet.add_run(line)
+            run_b.font.name = FONT_NAME
+            run_b.font.size = Pt(11)
+            run_b.font.color.rgb = COLOR_BODY
+            
+        # Secure memory buffer stream
         output_stream = io.BytesIO()
         doc.save(output_stream)
         output_stream.seek(0)
         return output_stream
 
-    if template_file is not None and uploaded_resume is not None:
+    if uploaded_resume is not None:
         raw_text = ""
         
+        # Extraction layer pipelines
         if uploaded_resume.name.endswith('.pdf'):
             try:
                 reader = pypdf.PdfReader(uploaded_resume)
@@ -164,7 +224,7 @@ elif app_mode == "📄 Resume Re-Formatter":
                     if chunk:
                         raw_text += chunk + "\n"
             except Exception as e:
-                st.error(f"Could not parse incoming PDF: {e}")
+                st.error(f"Could not parse incoming PDF framework: {e}")
         elif uploaded_resume.name.endswith('.docx'):
             try:
                 doc_in = Document(uploaded_resume)
@@ -172,22 +232,21 @@ elif app_mode == "📄 Resume Re-Formatter":
                     if para.text:
                         raw_text += para.text + "\n"
             except Exception as e:
-                st.error(f"Could not read incoming Docx paragraph structures: {e}")
+                st.error(f"Could not read incoming Docx paragraph schema: {e}")
                 
         if raw_text.strip():
-            st.success("Target text extracted successfully! Ready to re-map structure.")
+            st.success("Target text extracted successfully! Ready to standardize.")
             
-            with st.spinner("Injecting candidate text alignment into your Sample Master Template..."):
-                template_bytes = template_file.read()
-                processed_docx = inject_into_template(template_bytes, raw_text)
+            with st.spinner("Assembling custom formatting matrix into locked sample style..."):
+                processed_docx = build_sample_aligned_format(raw_text)
                 
             st.write("")
             st.download_button(
                 label="📥 Download Standardized Word File (.docx)",
                 data=processed_docx,
-                file_name=f"Formatted_Profile_{datetime.now().strftime('%Y%m%d')}.docx",
+                file_name=f"Buster_Formatted_Profile_{datetime.now().strftime('%Y%m%d')}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True
             )
-    elif template_file is None and uploaded_resume is not None:
-        st.info("💡 Please upload your blank master sample document template first above to match your branding format parameters.")
+        else:
+            st.warning("Could not gather clear text segments from this profile layout.")
