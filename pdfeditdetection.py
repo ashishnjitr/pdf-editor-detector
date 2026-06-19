@@ -1,5 +1,4 @@
 # 1. Install dependencies
-!pip install pypdf -q
 
 import io
 import re
