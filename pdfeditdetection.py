@@ -2,7 +2,6 @@ import streamlit as st
 import pypdf
 import re
 import io
-from datetime import datetime
 
 # 1. Page Configuration & Styling
 st.set_page_config(
@@ -12,106 +11,29 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom Corporate Security CSS
-st.markdown("""
-<style>
-    /* Global Brand Styling */
-    .brand-title {
-        font-family: 'Courier New', Courier, monospace;
-        font-size: 40px;
-        font-weight: 900;
-        letter-spacing: -1px;
-        color: #FF4B4B;
-        margin-bottom: 0px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .brand-tagline {
-        color: #6c757d;
-        font-size: 14px;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        margin-bottom: 30px;
-        border-bottom: 2px solid #efefef;
-        padding-bottom: 10px;
-    }
-    html[data-theme="dark"] .brand-tagline {
-        border-bottom-color: #2d3139;
-    }
-    
-    /* Forensic Metric Grid */
-    .buster-grid {
-        display: flex;
-        justify-content: space-between;
-        gap: 15px;
-        margin-top: 20px;
-        margin-bottom: 25px;
-    }
-    .buster-card {
-        background-color: #f8f9fa;
-        border: 1px solid #e9ecef;
-        border-top: 4px solid #6c757d;
-        border-radius: 6px;
-        padding: 18px;
-        flex: 1;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-    }
-    html[data-theme="dark"] .buster-card {
-        background-color: #1c1f26;
-        border-color: #2d3139;
-    }
-    .buster-card.alert-active {
-        border-top-color: #FF4B4B;
-    }
-    .buster-card.clean-active {
-        border-top-color: #28a745;
-    }
-    .buster-val {
-        font-size: 26px;
-        font-weight: 800;
-        font-family: monospace;
-        margin-bottom: 4px;
-    }
-    .buster-lbl {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #6c757d;
-        font-weight: 600;
-    }
+# Flattened UI CSS configuration to support Python 3.14 environments cleanly
+STYLE_INJECTION = (
+    "<style>"
+    ".brand-title { font-family: 'Courier New', Courier, monospace; font-size: 40px; font-weight: 900; letter-spacing: -1px; color: #FF4B4B; margin-bottom: 0px; display: flex; align-items: center; gap: 10px; }"
+    ".brand-tagline { color: #6c757d; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 30px; border-bottom: 2px solid #efefef; padding-bottom: 10px; }"
+    "html[data-theme='dark'] .brand-tagline { border-bottom-color: #2d3139; }"
+    ".buster-grid { display: flex; justify-content: space-between; gap: 15px; margin-top: 20px; margin-bottom: 25px; }"
+    ".buster-card { background-color: #f8f9fa; border: 1px solid #e9ecef; border-top: 4px solid #6c757d; border-radius: 6px; padding: 18px; flex: 1; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }"
+    "html[data-theme='dark'] .buster-card { background-color: #1c1f26; border-color: #2d3139; }"
+    ".buster-card.alert-active { border-top-color: #FF4B4B; }"
+    ".buster-card.clean-active { border-top-color: #28a745; }"
+    ".buster-val { font-size: 26px; font-weight: 800; font-family: monospace; margin-bottom: 4px; }"
+    ".buster-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6c757d; font-weight: 600; }"
+    ".detail-block { padding: 15px; border-radius: 6px; background-color: #fafafa; border-left: 4px solid #007bd9; margin-bottom: 12px; }"
+    "html[data-theme='dark'] .detail-block { background-color: #1e222b; }"
+    ".detail-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; color: #1f2937; }"
+    "html[data-theme='dark'] .detail-title { color: #f3f4f6; }"
+    ".detail-text { font-size: 13.5px; color: #4b5563; line-height: 1.5; }"
+    "html[data-theme='dark'] .detail-text { color: #d1d5db; }"
+    "</style>"
+)
 
-    /* Deep Dive Sections */
-    .detail-block {
-        padding: 15px;
-        border-radius: 6px;
-        background-color: #fafafa;
-        border-left: 4px solid #007bd9;
-        margin-bottom: 12px;
-    }
-    html[data-theme="dark"] .detail-block {
-        background-color: #1e222b;
-    }
-    .detail-title {
-        font-weight: 700;
-        font-size: 15px;
-        margin-bottom: 4px;
-        color: #1f2937;
-    }
-    html[data-theme="dark"] .detail-title {
-        color: #f3f4f6;
-    }
-    .detail-text {
-        font-size: 13.5px;
-        color: #4b5563;
-        line-height: 1.5;
-    }
-    html[data-theme="dark"] .detail-text {
-        color: #d1d5db;
-    }
-</style>
-""", unsafe_with_html=True)
+st.markdown(STYLE_INJECTION, unsafe_with_html=True)
 
 # 2. Rebranded Header Layout
 st.markdown('<div class="brand-title">💥 PDF BUSTER</div>', unsafe_with_html=True)
@@ -222,7 +144,6 @@ def analyze_pdf(file_bytes):
 if uploaded_file is not None:
     file_bytes = uploaded_file.read()
     
-    # Processing Banner
     with st.spinner("PDF BUSTER running structural isolation layers..."):
         analysis = analyze_pdf(file_bytes)
         
@@ -236,35 +157,28 @@ if uploaded_file is not None:
         st.success("🛡️ **PDF BUSTER VERDICT: SECURE / NO MANIPULATION DETECTED**", icon="✅")
         card_class = "clean-active"
         
-    # High-Definition Metric Cards Grid
-    st.markdown(f"""
-    <div class="buster-grid">
-        <div class="buster-card {card_class}">
-            <div class="buster-val">{analysis['incremental_updates']}</div>
-            <div class="buster-lbl">Save Cycles</div>
-        </div>
-        <div class="buster-card {card_class}">
-            <div class="buster-val">{analysis['dates_match']}</div>
-            <div class="buster-lbl">Timeline Sync</div>
-        </div>
-        <div class="buster-card {card_class}">
-            <div class="buster-val" style="font-size:14px; padding-top:10px; overflow:hidden;">{analysis['producer']}</div>
-            <div class="buster-lbl">Core Engine</div>
-        </div>
-    </div>
-    """, unsafe_with_html=True)
+    # HTML Layout for Metric Cards
+    metrics_html = (
+        f'<div class="buster-grid">'
+        f'<div class="buster-card {card_class}"><div class="buster-val">{analysis["incremental_updates"]}</div><div class="buster-lbl">Save Cycles</div></div>'
+        f'<div class="buster-card {card_class}"><div class="buster-val">{analysis["dates_match"]}</div><div class="buster-lbl">Timeline Sync</div></div>'
+        f'<div class="buster-card {card_class}"><div class="buster-val" style="font-size:13px; padding-top:10px; overflow:hidden;">{analysis["producer"]}</div><div class="buster-lbl">Core Engine</div></div>'
+        f'</div>'
+    )
+    st.markdown(metrics_html, unsafe_with_html=True)
     
     # Detailed High-Definition Forensic Output
     st.subheader("📋 Detailed Forensic Breakdown")
     st.caption("Granular breakdown of isolated binary layers and metadata validation checks:")
     
     for finding in analysis["detailed_findings"]:
-        st.markdown(f"""
-        <div class="detail-block">
-            <div class="detail-title">🔹 {finding['title']}</div>
-            <div class="detail-text">{finding['text']}</div>
-        </div>
-        """, unsafe_with_html=True)
+        finding_html = (
+            f'<div class="detail-block">'
+            f'<div class="detail-title">🔹 {finding["title"]}</div>'
+            f'<div class="detail-text">{finding["text"]}</div>'
+            f'</div>'
+        )
+        st.markdown(finding_html, unsafe_with_html=True)
         
     # Technical Raw Matrix Accordion
     st.markdown("<br>", unsafe_with_html=True)
