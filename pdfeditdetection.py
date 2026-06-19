@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="PDF BUSTER // Recruitment Core", 
     page_icon="💥", 
     layout="centered",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 STYLE_INJECTION = """
@@ -36,7 +36,7 @@ st.html('<div class="brand-tagline">Automated Digital Tampering & Workforce Auto
 st.sidebar.markdown("### 🛠️ Mode Selection")
 app_mode = st.sidebar.radio(
     "Choose Utility Interface:",
-    ["🔍 PDF Forensic Analyzer", "📄 Template Resume Re-Formatter"]
+    ["🔍 PDF Forensic Analyzer", "📄 Resume Re-Formatter"]
 )
 
 # -------------------------------------------------------------
@@ -127,22 +127,18 @@ elif app_mode == "📄 Resume Re-Formatter":
     uploaded_resume = st.file_uploader("Upload raw candidate profile (PDF or Word)", type=["pdf", "docx"], key="resume_upload")
     
     def inject_into_template(template_bytes, candidate_text):
-        # Open your custom master sample format
         doc = Document(io.BytesIO(template_bytes))
         
-        # Parse clean, readable lines out of incoming resume text
         lines = [line.strip() for line in candidate_text.split('\n') if line.strip()]
         candidate_name = lines[0] if lines else "Candidate Profile"
         full_body_text = "\n".join(lines[1:]) if len(lines) > 1 else "No text extracted."
         
-        # Target placeholder strings inside your Word Template paragraphs
         for paragraph in doc.paragraphs:
             if "[CANDIDATE_NAME]" in paragraph.text:
                 paragraph.text = paragraph.text.replace("[CANDIDATE_NAME]", candidate_name)
             if "[RESUME_BODY]" in paragraph.text:
                 paragraph.text = paragraph.text.replace("[RESUME_BODY]", full_body_text)
                 
-        # Target inside structural document tables (in case placeholders are in grids)
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
@@ -152,7 +148,6 @@ elif app_mode == "📄 Resume Re-Formatter":
                         if "[RESUME_BODY]" in paragraph.text:
                             paragraph.text = paragraph.text.replace("[RESUME_BODY]", full_body_text)
 
-        # Output the modified template directly to an in-memory stream buffer
         output_stream = io.BytesIO()
         doc.save(output_stream)
         output_stream.seek(0)
@@ -161,7 +156,6 @@ elif app_mode == "📄 Resume Re-Formatter":
     if template_file is not None and uploaded_resume is not None:
         raw_text = ""
         
-        # Read text content from incoming profile
         if uploaded_resume.name.endswith('.pdf'):
             try:
                 reader = pypdf.PdfReader(uploaded_resume)
