@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Use st.html() instead of st.markdown() to prevent Python 3.14 / Streamlit layout bugs
+# Native HTML/CSS layout configuration
 STYLE_INJECTION = """
 <style>
     .brand-title { font-family: 'Courier New', Courier, monospace; font-size: 40px; font-weight: 900; letter-spacing: -1px; color: #FF4B4B; margin-bottom: 0px; display: flex; align-items: center; gap: 10px; }
@@ -142,7 +142,8 @@ if uploaded_file is not None:
     with st.spinner("PDF BUSTER running structural isolation layers..."):
         analysis = analyze_pdf(file_bytes)
         
-    st.markdown("<br>", unsafe_with_html=True)
+    # Safe paragraph padding spacing
+    st.write("")
     
     # Rebranded High-Impact Verdict Banner
     if analysis["is_edited"]:
@@ -152,6 +153,8 @@ if uploaded_file is not None:
         st.success("🛡️ **PDF BUSTER VERDICT: SECURE / NO MANIPULATION DETECTED**", icon="✅")
         card_class = "clean-active"
         
+    st.write("")
+    
     # HTML Layout for Metric Cards via st.html()
     metrics_html = (
         f'<div class="buster-grid">'
@@ -176,7 +179,7 @@ if uploaded_file is not None:
         st.html(finding_html)
         
     # Technical Raw Matrix Accordion
-    st.markdown("<br>", unsafe_with_html=True)
+    st.write("")
     with st.expander("🛠️ View Raw System Object Array"):
         if analysis["metadata"]:
             st.json(analysis["metadata"])
