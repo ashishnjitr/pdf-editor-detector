@@ -42,7 +42,7 @@ app_mode = st.sidebar.radio(
 )
 
 # -------------------------------------------------------------
-# MODE A: ADVANCED FORENSIC ANALYZER UTILITY
+# MODE A: EXPERT FORENSIC ANALYZER UTILITY
 # -------------------------------------------------------------
 if app_mode == "🔍 PDF Forensic Analyzer":
     st.subheader("Deep-Object Tampering Analytics")
@@ -54,7 +54,7 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             "xref_tables": 0,
             "font_anomalies": 0,
             "is_edited": False,
-            "risk_score": 0,  # Accumulator for threat matrix
+            "tamper_lock": False,  # Strict indicator for a consumer PDF editor tool execution
             "metadata": {},
             "detailed_findings": [],
             "edited_segments": [],  
@@ -62,21 +62,14 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             "dates_match": "Verified"
         }
         
-        # --- 1. BASIC BINARY & METADATA FORENSICS ---
+        # Gather basic structure values
         eof_markers = re.findall(b'%%EOF', file_bytes)
         xref_markers = re.findall(b'xref', file_bytes)
         results["incremental_updates"] = len(eof_markers)
         results["xref_tables"] = len(xref_markers)
-        
-        if len(eof_markers) > 1 or len(xref_markers) > 1:
-            results["is_edited"] = True
-            results["risk_score"] += 45  # Massive indicator of deliberate file rewriting
-            results["detailed_findings"].append({
-                "title": "🚨 Incremental Structural Patch Detected",
-                "text": f"Found {len(eof_markers)} End-of-File (%%EOF) tokens and {len(xref_markers)} Cross-Reference (XREF) internal maps. Multiple instances confirm the file container layout was appended to via external editing workflows."
-            })
 
-        # --- 2. DEEP COMPONENT ANALYSIS: ISOLATING SPECIFIC EDITS ---
+        # --- PHASE 1: PARSE VISUAL LAYERS FOR EXPLICIT EDITOR ARTIFACTS ---
+        has_extracted_text = False
         try:
             doc_fitz = fitz.open(stream=file_bytes, filetype="pdf")
             
@@ -86,13 +79,15 @@ if app_mode == "🔍 PDF Forensic Analyzer":
                 
                 for block in text_blocks:
                     block_text = block[4].strip()
-                    # Catch common consumer application fingerprints embedded directly on the page layout
-                    if any(marker in block_text.lower() for marker in ["ilovepdf", "smallpdf", "watermark", "eval", "sejda", "pdfescape"]):
-                        results["is_edited"] = True
-                        results["risk_score"] += 60  # Found an explicit third-party layout injection block!
-                        results["edited_segments"].append(f"Page {page_num + 1} Overlay Segment: '{block_text}'")
+                    if block_text:
+                        has_extracted_text = True
+                    
+                    # Intercept editor signatures or watermark overlays hidden within layout streams
+                    if any(marker in block_text.lower() for marker in ["ilovepdf", "smallpdf", "watermark", "eval", "sejda", "pdfescape", "pdf2go"]):
+                        results["tamper_lock"] = True
+                        results["edited_segments"].append(f"Page {page_num + 1} Editor Injection Block: '{block_text}'")
             
-            # Analyze font sub-arrays
+            # Analyze embedded font metadata
             all_fonts = []
             for page in doc_fitz:
                 all_fonts.extend([f[3] for f in page.get_fonts() if f])
@@ -100,18 +95,10 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             suspicious_fonts = [f for f in unique_fonts if "identity-h" in f.lower() or "custom" in f.lower()]
             results["font_anomalies"] = len(suspicious_fonts)
             
-            if len(suspicious_fonts) > 0:
-                results["is_edited"] = True
-                results["risk_score"] += 20  # Clashing internal text encodings
-                results["detailed_findings"].append({
-                    "title": "⚠️ Font Encoding Deviation",
-                    "text": f"Detected mismatched font subsets ({', '.join(suspicious_fonts[:2])}). Typographic overrides occur when external editors patch specific text fields fields."
-                })
-                
         except Exception as e:
             results["detailed_findings"].append({"title": "Forensic Parse Interruption", "text": str(e)})
 
-        # --- 3. METADATA TIMESTAMP VALIDATION ---
+        # --- PHASE 2: AUDIT SYSTEM PRODUCER METADATA TREE ---
         try:
             pdf_file = io.BytesIO(file_bytes)
             reader = pypdf.PdfReader(pdf_file)
@@ -122,38 +109,41 @@ if app_mode == "🔍 PDF Forensic Analyzer":
                 raw_producer = cleaned_meta.get("Producer", "Unknown")
                 results["producer"] = raw_producer[:20] + "..." if len(raw_producer) > 20 else raw_producer
                 
-                create_date = cleaned_meta.get("CreationDate")
-                mod_date = cleaned_meta.get("ModDate")
-                if create_date and mod_date and create_date != mod_date:
-                    results["is_edited"] = True
-                    results["dates_match"] = "Mismatch"
-                    results["risk_score"] += 15  # Re-saved timeline trace
-                    results["detailed_findings"].append({
-                        "title": "⏰ Timeline Synchronization Failure",
-                        "text": f"The document creation window ({create_date}) doesn't align with the revision timestamp ({mod_date})."
-                    })
-                    
-                # Audit system core producer indicators
+                # Check for explicit third-party PDF editor footprints in the producer property string
                 producer_lower = raw_producer.lower()
                 suspicious_tools = ["ilovepdf", "smallpdf", "pdf2go", "nitro", "soda", "libreoffice", "canva", "pdfescape", "sejda"]
                 for tool in suspicious_tools:
                     if tool in producer_lower:
-                        results["is_edited"] = True
-                        results["risk_score"] += 40
+                        results["tamper_lock"] = True
                         results["detailed_findings"].append({
-                            "title": "🎭 Consumer Tool Stamped Producer Profile",
-                            "text": f"Container properties map usage of public online file conversion engine utilities: '{raw_producer}'"
+                            "title": "🎭 PDF Editor Tool Profile Trapped",
+                            "text": f"File properties explicitly identify usage of consumer editing engine framework: '{raw_producer}'"
                         })
-            else:
-                results["is_edited"] = True
-                results["dates_match"] = "Wiped"
-                results["risk_score"] += 35  # Suspiciously stripped profile indicators
-                results["detailed_findings"].append({
-                    "title": "🧼 Sanitized Object Container Tree",
-                    "text": "The operational metadata dictionary has been wiped clean, indicating high probability of an intentional flattening engine execution."
-                })
+                
+                create_date = cleaned_meta.get("CreationDate")
+                mod_date = cleaned_meta.get("ModDate")
+                if create_date and mod_date and create_date != mod_date:
+                    results["dates_match"] = "Mismatch"
         except:
             pass
+
+        # --- PHASE 3: EVALUATE TARGET MATRIX RULES ---
+        # Rule A: If an explicit PDF Editor tool fingerprint is isolated, immediately Red Flag.
+        if results["tamper_lock"] or len(results["edited_segments"]) > 0:
+            results["is_edited"] = True
+            
+        # Rule B: Font clashing combined with a timeline mismatch indicates manual numeric modification.
+        elif results["font_anomalies"] > 0 and results["dates_match"] == "Mismatch":
+            results["is_edited"] = True
+            results["detailed_findings"].append({
+                "title": "⚠️ Targeted Data Modification Signature",
+                "text": "Detected localized typographic anomalies alongside a modified timestamp timeline conflict. This occurs when individual fields are adjusted post-generation."
+            })
+            
+        # Rule C: If it has multiple save cycles but contains no real font conflicts or tool tags, it's a safe scan/resave.
+        else:
+            # Document is clean or is a standard scanned/flattened image workflow.
+            results["is_edited"] = False
 
         return results
 
@@ -164,17 +154,15 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             
         st.write("")
         
-        # --- NEW DYNAMIC SAFETY VERDICT OVERLAY ENGINE ---
-        score = analysis["risk_score"]
-        
-        if score >= 75:
-            st.error(f"🚨 **PDF BUSTER VERDICT: CRITICAL RED FLAG (110% TAMPERED)** \n\n Threat Risk Score: {score}/100 — Do not proceed with verification parameters.", icon="🛑")
+        # Display high-stakes visual risk block alerts
+        if analysis["tamper_lock"]:
+            st.error("🚨 **PDF BUSTER VERDICT: FULL RED FLAG (110% TAMPERED)** \n\n Explicit usage of external PDF Editor Tools isolated. Document is unsafe.", icon="🛑")
             card_class = "alert-active"
-        elif 0 < score < 75:
-            st.warning(f"⚠️ **PDF BUSTER VERDICT: CAUTION (POTENTIAL EDITS ISOLATED)** \n\n Threat Risk Score: {score}/100 — Review forensic logs and cross-examine chronological indicators.", icon="⚡")
+        elif analysis["is_edited"]:
+            st.warning("⚠️ **PDF BUSTER VERDICT: CAUTION (MANIPULATION INDICATORS FOUND)** \n\n Internal typographic or timeline deviations found. Review details below.", icon="⚡")
             card_class = "caution-active"
         else:
-            st.success("🛡️ **PDF BUSTER VERDICT: SECURE / SAFE TO PROCEED** \n\n Threat Risk Score: 0/100 — Layout profile matches structural export requirements.", icon="✅")
+            st.success("🛡️ **PDF BUSTER VERDICT: SECURE / SAFE TO PROCEED** \n\n Structure matches requirements. Scanned, flattened, or original unedited state confirmed.", icon="✅")
             card_class = "clean-active"
             
         metrics_html = (
@@ -206,4 +194,4 @@ elif app_mode == "📄 Resume Re-Formatter":
     st.markdown("Convert raw, unformatted candidate details into your exact reference profile format.")
     
     uploaded_resume = st.file_uploader("Upload raw candidate profile (PDF or Word)", type=["pdf", "docx"], key="resume_upload")
-    # [Your fully responsive multi-page layout rendering loop maps directly down below completely unchanged]
+    # [Your full multi-page layout builder logic text-routing code blocks run here completely unchanged]
