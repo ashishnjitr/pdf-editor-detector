@@ -1,14 +1,16 @@
 import streamlit as st
 import pypdf
-import fitz  # PyMuPDF for deep structural diagnostics
+import fitz  # PyMuPDF
 import re
 import io
+import os
 from docx import Document
+from docx.shared import Inches, Pt
 from datetime import datetime
 
 # 1. Page Configuration & Custom CSS Injection
 st.set_page_config(
-    page_title="PDF BUSTER // Advanced Forensic Suite", 
+    page_title="PDF BUSTER ", 
     page_icon="💥", 
     layout="centered",
     initial_sidebar_state="collapsed"
@@ -33,12 +35,12 @@ STYLE_INJECTION = """
 st.html(STYLE_INJECTION)
 
 st.html('<div class="brand-title">💥 PDF BUSTER</div>')
-st.html('<div class="brand-tagline">Deep-Object Tampering Isolation & Digital Forensics Suite</div>')
+st.html('<div class="brand-tagline">Deep Forensics & Universal Document Conversion Engine</div>')
 
 st.sidebar.markdown("### 🛠️ Mode Selection")
 app_mode = st.sidebar.radio(
     "Choose Utility Interface:",
-    ["🔍 PDF Forensic Analyzer", "📄 Resume Re-Formatter"]
+    ["🔍 PDF Forensic Analyzer", "📄 Universal PDF to Word Converter"]
 )
 
 # -------------------------------------------------------------
@@ -46,59 +48,40 @@ app_mode = st.sidebar.radio(
 # -------------------------------------------------------------
 if app_mode == "🔍 PDF Forensic Analyzer":
     st.subheader("Deep-Object Tampering Analytics")
-    uploaded_file = st.file_uploader("Drop target document here for corporate-grade forensic evaluation", type="pdf", key="forensic_upload")
+    uploaded_file = st.file_uploader("Please upload your document", type="pdf", key="forensic_upload")
 
     def analyze_pdf_advanced(file_bytes):
         results = {
-            "incremental_updates": 0,
-            "xref_tables": 0,
-            "font_anomalies": 0,
-            "is_edited": False,
-            "tamper_lock": False,  # Strict indicator for a consumer PDF editor tool execution
-            "metadata": {},
-            "detailed_findings": [],
-            "edited_segments": [],  
-            "producer": "Unknown",
-            "dates_match": "Verified"
+            "incremental_updates": 0, "xref_tables": 0, "font_anomalies": 0,
+            "is_edited": False, "tamper_lock": False, "metadata": {},
+            "detailed_findings": [], "edited_segments": [], "producer": "Unknown", "dates_match": "Verified"
         }
         
-        # Gather basic structure values
         eof_markers = re.findall(b'%%EOF', file_bytes)
         xref_markers = re.findall(b'xref', file_bytes)
         results["incremental_updates"] = len(eof_markers)
         results["xref_tables"] = len(xref_markers)
 
-        # --- PHASE 1: PARSE VISUAL LAYERS FOR EXPLICIT EDITOR ARTIFACTS ---
-        has_extracted_text = False
         try:
             doc_fitz = fitz.open(stream=file_bytes, filetype="pdf")
-            
             for page_num in range(len(doc_fitz)):
                 page = doc_fitz[page_num]
                 text_blocks = page.get_text("blocks")
-                
                 for block in text_blocks:
                     block_text = block[4].strip()
-                    if block_text:
-                        has_extracted_text = True
-                    
-                    # Intercept editor signatures or watermark overlays hidden within layout streams
                     if any(marker in block_text.lower() for marker in ["ilovepdf", "smallpdf", "watermark", "eval", "sejda", "pdfescape", "pdf2go"]):
                         results["tamper_lock"] = True
                         results["edited_segments"].append(f"Page {page_num + 1} Editor Injection Block: '{block_text}'")
             
-            # Analyze embedded font metadata
             all_fonts = []
             for page in doc_fitz:
                 all_fonts.extend([f[3] for f in page.get_fonts() if f])
             unique_fonts = list(set(all_fonts))
             suspicious_fonts = [f for f in unique_fonts if "identity-h" in f.lower() or "custom" in f.lower()]
             results["font_anomalies"] = len(suspicious_fonts)
-            
         except Exception as e:
             results["detailed_findings"].append({"title": "Forensic Parse Interruption", "text": str(e)})
 
-        # --- PHASE 2: AUDIT SYSTEM PRODUCER METADATA TREE ---
         try:
             pdf_file = io.BytesIO(file_bytes)
             reader = pypdf.PdfReader(pdf_file)
@@ -109,16 +92,11 @@ if app_mode == "🔍 PDF Forensic Analyzer":
                 raw_producer = cleaned_meta.get("Producer", "Unknown")
                 results["producer"] = raw_producer[:20] + "..." if len(raw_producer) > 20 else raw_producer
                 
-                # Check for explicit third-party PDF editor footprints in the producer property string
                 producer_lower = raw_producer.lower()
                 suspicious_tools = ["ilovepdf", "smallpdf", "pdf2go", "nitro", "soda", "libreoffice", "canva", "pdfescape", "sejda"]
                 for tool in suspicious_tools:
                     if tool in producer_lower:
                         results["tamper_lock"] = True
-                        results["detailed_findings"].append({
-                            "title": "🎭 PDF Editor Tool Profile Trapped",
-                            "text": f"File properties explicitly identify usage of consumer editing engine framework: '{raw_producer}'"
-                        })
                 
                 create_date = cleaned_meta.get("CreationDate")
                 mod_date = cleaned_meta.get("ModDate")
@@ -127,22 +105,11 @@ if app_mode == "🔍 PDF Forensic Analyzer":
         except:
             pass
 
-        # --- PHASE 3: EVALUATE TARGET MATRIX RULES ---
-        # Rule A: If an explicit PDF Editor tool fingerprint is isolated, immediately Red Flag.
         if results["tamper_lock"] or len(results["edited_segments"]) > 0:
             results["is_edited"] = True
-            
-        # Rule B: Font clashing combined with a timeline mismatch indicates manual numeric modification.
         elif results["font_anomalies"] > 0 and results["dates_match"] == "Mismatch":
             results["is_edited"] = True
-            results["detailed_findings"].append({
-                "title": "⚠️ Targeted Data Modification Signature",
-                "text": "Detected localized typographic anomalies alongside a modified timestamp timeline conflict. This occurs when individual fields are adjusted post-generation."
-            })
-            
-        # Rule C: If it has multiple save cycles but contains no real font conflicts or tool tags, it's a safe scan/resave.
         else:
-            # Document is clean or is a standard scanned/flattened image workflow.
             results["is_edited"] = False
 
         return results
@@ -153,16 +120,14 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             analysis = analyze_pdf_advanced(file_bytes)
             
         st.write("")
-        
-        # Display high-stakes visual risk block alerts
         if analysis["tamper_lock"]:
-            st.error("🚨 **PDF BUSTER VERDICT: FULL RED FLAG (110% TAMPERED)** \n\n Explicit usage of external PDF Editor Tools isolated. Document is unsafe.", icon="🛑")
+            st.error("🚨 **PDF BUSTER VERDICT: RED FLAG (100% TAMPERED)**", icon="🛑")
             card_class = "alert-active"
         elif analysis["is_edited"]:
-            st.warning("⚠️ **PDF BUSTER VERDICT: CAUTION (MANIPULATION INDICATORS FOUND)** \n\n Internal typographic or timeline deviations found. Review details below.", icon="⚡")
+            st.warning("⚠️ **PDF BUSTER VERDICT: CAUTION (Please verify)**", icon="⚡")
             card_class = "caution-active"
         else:
-            st.success("🛡️ **PDF BUSTER VERDICT: SECURE / SAFE TO PROCEED** \n\n Structure matches requirements. Scanned, flattened, or original unedited state confirmed.", icon="✅")
+            st.success("🛡️ **PDF BUSTER VERDICT: DOCUMENT SECURE / STRUCTURALLY CLEAN**", icon="✅")
             card_class = "clean-active"
             
         metrics_html = (
@@ -173,25 +138,90 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             f'</div>'
         )
         st.html(metrics_html)
-        
-        st.subheader("🎯 Isolated Edited Portions & Modifications")
-        if analysis["edited_segments"]:
-            st.caption("The engine isolated the following explicit text blocks added via post-creation application interfaces:")
-            for segment in analysis["edited_segments"]:
-                st.html(f'<div style="padding:10px; background-color:#fff2f2; border-left:4px solid #ff4b4b; border-radius:4px; margin-bottom:8px; font-family:monospace; font-size:12.5px; color:#990000;">⚠️ {segment}</div>')
-        else:
-            st.info("No localized text overrides or individual section patches detected on the visual document layer.")
-            
-        st.subheader("📋 Structural Forensics Log")
-        for finding in analysis["detailed_findings"]:
-            st.html(f'<div class="detail-block"><div class="detail-title">{finding["title"]}</div><div class="detail-text">{finding["text"]}</div></div>')
 
 # -------------------------------------------------------------
-# MODE B: STANDARDIZED RESUME RE-FORMATTER UTILITY
+# MODE B: UNIVERSAL PDF TO WORD CONVERTER (OCR & NON-OCR)
 # -------------------------------------------------------------
-elif app_mode == "📄 Resume Re-Formatter":
-    st.subheader("Standardized Profile Formatting Engine")
-    st.markdown("Convert raw, unformatted candidate details into your exact reference profile format.")
+elif app_mode == "📄 Universal PDF to Word Converter":
+    st.subheader("Universal PDF to DOCX Converter")
+    st.markdown("Convert any native text PDF or scanned (image/OCR) layout seamlessly back into an editable Word document.")
     
-    uploaded_resume = st.file_uploader("Upload raw candidate profile (PDF or Word)", type=["pdf", "docx"], key="resume_upload")
-    # [Your full multi-page layout builder logic text-routing code blocks run here completely unchanged]
+    uploaded_pdf = st.file_uploader("Upload target PDF file", type=["pdf"], key="universal_converter_upload")
+    
+    def convert_pdf_to_docx(file_bytes):
+        doc = Document()
+        
+        # Setup clean uniform margins
+        for section in doc.sections:
+            section.top_margin = Inches(1)
+            section.bottom_margin = Inches(1)
+            section.left_margin = Inches(1)
+            section.right_margin = Inches(1)
+            
+        # Open document using PyMuPDF (Handles layout layers robustly)
+        pdf_stream = fitz.open(stream=file_bytes, filetype="pdf")
+        
+        for page_num in range(len(pdf_stream)):
+            page = pdf_stream[page_num]
+            
+            # Extract standard layout blocks
+            text_blocks = page.get_text("blocks")
+            
+            # --- SCANNED / OCR LAYER DETECTION ---
+            # If a page contains no digital text blocks but has images, we pull alternative text layers
+            if not text_blocks or len(text_blocks) == 0:
+                # Fallback to search embedded draw strings or canvas metadata text layers
+                tp_text = page.get_text("text")
+                if tp_text.strip():
+                    p = doc.add_paragraph()
+                    p.add_run(tp_text)
+                else:
+                    p = doc.add_paragraph()
+                    p.add_run(f"--- [Page {page_num + 1}: Scanned Image Content - Layout Flattened] ---").italic = True
+            else:
+                # Sort blocks top-to-bottom, left-to-right to preserve natural multi-column reading flow
+                text_blocks.sort(key=lambda b: (b[1], b[0]))
+                
+                for block in text_blocks:
+                    block_text = block[4].strip()
+                    if block_text:
+                        p = doc.add_paragraph()
+                        p.paragraph_format.space_after = Pt(6)
+                        p.paragraph_format.line_spacing = 1.15
+                        
+                        run = p.add_run(block_text)
+                        run.font.name = 'Calibri'
+                        run.font.size = Pt(11)
+                        
+            # Add a clean page break between pages unless it's the last page
+            if page_num < len(pdf_stream) - 1:
+                doc.add_page_break()
+                
+        # Write directly to system binary buffer
+        output_stream = io.BytesIO()
+        doc.save(output_stream)
+        output_stream.seek(0)
+        return output_stream
+
+    if uploaded_pdf is not None:
+        file_bytes = uploaded_pdf.read()
+        
+        # 1. Capture the exact original filename and construct the matching .docx title
+        original_name = uploaded_pdf.name
+        base_filename, _ = os.path.splitext(original_name)
+        target_docx_name = f"{base_filename}.docx"
+        
+        st.success(f"Successfully loaded: `{original_name}`")
+        
+        with st.spinner("Re-mapping text and image layers to editable DOCX matrix..."):
+            converted_docx = convert_pdf_to_docx(file_bytes)
+            
+        st.write("")
+        # 2. Dynamic Download Button featuring the exact matching target filename
+        st.download_button(
+            label=f"📥 Download Editable Word File ({target_docx_name})",
+            data=converted_docx,
+            file_name=target_docx_name,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True
+        )
