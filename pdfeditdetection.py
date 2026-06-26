@@ -1,3 +1,45 @@
+import streamlit as st
+import pypdf
+import fitz  # PyMuPDF for deep visual/object extraction
+import re
+import io
+from docx import Document
+from datetime import datetime
+
+# 1. Page Configuration & Custom CSS Injection
+st.set_page_config(
+    page_title="PDF BUSTER // Advanced Forensic Suite", 
+    page_icon="💥", 
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
+STYLE_INJECTION = """
+<style>
+    .brand-title { font-family: 'Courier New', Courier, monospace; font-size: 40px; font-weight: 900; letter-spacing: -1px; color: #FF4B4B; margin-bottom: 0px; display: flex; align-items: center; gap: 10px; }
+    .brand-tagline { color: #6c757d; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 30px; border-bottom: 2px solid #efefef; padding-bottom: 10px; }
+    .buster-grid { display: flex; justify-content: space-between; gap: 15px; margin-top: 20px; margin-bottom: 25px; }
+    .buster-card { background-color: #f8f9fa; border: 1px solid #e9ecef; border-top: 4px solid #6c757d; border-radius: 6px; padding: 18px; flex: 1; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+    .buster-card.alert-active { border-top-color: #FF4B4B; }
+    .buster-card.clean-active { border-top-color: #28a745; }
+    .buster-val { font-size: 26px; font-weight: 800; font-family: monospace; margin-bottom: 4px; }
+    .buster-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6c757d; font-weight: 600; }
+    .detail-block { padding: 15px; border-radius: 6px; background-color: #fafafa; border-left: 4px solid #007bd9; margin-bottom: 12px; }
+    .detail-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; color: #1f2937; }
+    .detail-text { font-size: 13.5px; color: #4b5563; line-height: 1.5; }
+</style>
+"""
+st.html(STYLE_INJECTION)
+
+st.html('<div class="brand-title">💥 PDF BUSTER</div>')
+st.html('<div class="brand-tagline">Deep-Object Tampering Isolation & Digital Forensics Suite</div>')
+
+st.sidebar.markdown("### 🛠️ Mode Selection")
+app_mode = st.sidebar.radio(
+    "Choose Utility Interface:",
+    ["🔍 PDF Forensic Analyzer", "📄 Resume Re-Formatter"]
+)
+
 # -------------------------------------------------------------
 # MODE A: ADVANCED FORENSIC ANALYZER UTILITY
 # -------------------------------------------------------------
@@ -13,7 +55,7 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             "is_edited": False,
             "metadata": {},
             "detailed_findings": [],
-            "edited_segments": [],  # New container for exact text changes
+            "edited_segments": [],  
             "producer": "Unknown",
             "dates_match": "Verified"
         }
@@ -24,34 +66,29 @@ if app_mode == "🔍 PDF Forensic Analyzer":
         results["incremental_updates"] = len(eof_markers)
         results["xref_tables"] = len(xref_markers)
         
-        if len(eof_markers) > 1:
+        if len(eof_markers) > 1 or len(xref_markers) > 1:
             results["is_edited"] = True
             results["detailed_findings"].append({
                 "title": "🚨 Incremental Structural Patch Detected",
-                "text": f"Found {len(eof_markers)} End-of-File (%%EOF) tokens. This indicates structural version stacking."
+                "text": f"Found {len(eof_markers)} End-of-File (%%EOF) tokens and {len(xref_markers)} Cross-Reference (XREF) internal maps. Multiple instances indicate post-creation editing wrappers."
             })
 
         # --- 2. DEEP COMPONENT ANALYSIS: ISOLATING SPECIFIC EDITS ---
         try:
             doc_fitz = fitz.open(stream=file_bytes, filetype="pdf")
             
-            # Look at internal string segments to catch overlapping text/masked elements
             for page_num in range(len(doc_fitz)):
                 page = doc_fitz[page_num]
-                
-                # Extract text blocks with precise structural metadata layout attributes
                 text_blocks = page.get_text("blocks")
                 
-                # Look for suspicious layout anomalies (e.g., text blocks on top of each other)
                 for block in text_blocks:
                     block_text = block[4].strip()
-                    
-                    # If an object contains signatures of common consumer web-tool generation blocks
+                    # Catch common web utility indicators hidden inside text blocks
                     if any(marker in block_text.lower() for marker in ["ilovepdf", "smallpdf", "watermark", "eval"]):
                         results["is_edited"] = True
                         results["edited_segments"].append(f"Page {page_num + 1} Overlay Segment: '{block_text}'")
             
-            # Extract Font names to double-check editing layers
+            # Analyze embedded font sub-arrays
             all_fonts = []
             for page in doc_fitz:
                 all_fonts.extend([f[3] for f in page.get_fonts() if f])
@@ -59,10 +96,13 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             suspicious_fonts = [f for f in unique_fonts if "identity-h" in f.lower() or "custom" in f.lower()]
             results["font_anomalies"] = len(suspicious_fonts)
             
+            if len(suspicious_fonts) > 0:
+                results["is_edited"] = True
+                
         except Exception as e:
             results["detailed_findings"].append({"title": "Forensic Parse Interruption", "text": str(e)})
 
-        # Standard baseline metadata processing
+        # --- 3. METADATA TIMESTAMP VALIDATION ---
         try:
             pdf_file = io.BytesIO(file_bytes)
             reader = pypdf.PdfReader(pdf_file)
@@ -78,6 +118,10 @@ if app_mode == "🔍 PDF Forensic Analyzer":
                 if create_date and mod_date and create_date != mod_date:
                     results["is_edited"] = True
                     results["dates_match"] = "Mismatch"
+                    results["detailed_findings"].append({
+                        "title": "⏰ Timeline Synchronization Failure",
+                        "text": "Creation Date and Modification Date mismatch. File was saved again after initial creation."
+                    })
         except:
             pass
 
@@ -105,7 +149,6 @@ if app_mode == "🔍 PDF Forensic Analyzer":
         )
         st.html(metrics_html)
         
-        # --- NEW SECTION: DISPLAYING EXACT EDITED PORTIONS ---
         st.subheader("🎯 Isolated Edited Portions & Modifications")
         if analysis["edited_segments"]:
             st.caption("The engine isolated the following explicit text blocks added via post-creation application interfaces:")
@@ -117,3 +160,14 @@ if app_mode == "🔍 PDF Forensic Analyzer":
         st.subheader("📋 Structural Forensics Log")
         for finding in analysis["detailed_findings"]:
             st.html(f'<div class="detail-block"><div class="detail-title">{finding["title"]}</div><div class="detail-text">{finding["text"]}</div></div>')
+
+# -------------------------------------------------------------
+# MODE B: STANDARDIZED RESUME RE-FORMATTER UTILITY
+# -------------------------------------------------------------
+elif app_mode == "📄 Resume Re-Formatter":
+    st.subheader("Standardized Profile Formatting Engine")
+    st.markdown("Convert raw, unformatted candidate details into your exact reference profile format.")
+    
+    uploaded_resume = st.file_uploader("Upload raw candidate profile (PDF or Word)", type=["pdf", "docx"], key="resume_upload")
+    
+    # [Your complete multi-page text routing logic goes here]
