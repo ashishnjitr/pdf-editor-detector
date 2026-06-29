@@ -10,7 +10,7 @@ from datetime import datetime
 
 # 1. Page Configuration & Custom CSS Injection
 st.set_page_config(
-    page_title="PDF BUSTER ", 
+    page_title="PDF BUSTER // Advanced Forensic Suite", 
     page_icon="💥", 
     layout="centered",
     initial_sidebar_state="collapsed"
@@ -30,6 +30,10 @@ STYLE_INJECTION = """
     .detail-block { padding: 15px; border-radius: 6px; background-color: #fafafa; border-left: 4px solid #007bd9; margin-bottom: 12px; }
     .detail-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; color: #1f2937; }
     .detail-text { font-size: 13.5px; color: #4b5563; line-height: 1.5; }
+    
+    .evidence-box { padding: 12px; background-color: #fff8f8; border: 1px solid #ffebeb; border-radius: 6px; margin-bottom: 15px; }
+    .evidence-item { font-size: 13px; font-family: monospace; color: #333; margin-bottom: 4px; }
+    .evidence-label { font-weight: bold; color: #c00; }
 </style>
 """
 st.html(STYLE_INJECTION)
@@ -48,20 +52,26 @@ app_mode = st.sidebar.radio(
 # -------------------------------------------------------------
 if app_mode == "🔍 PDF Forensic Analyzer":
     st.subheader("Deep-Object Tampering Analytics")
-    uploaded_file = st.file_uploader("Please upload your document", type="pdf", key="forensic_upload")
+    uploaded_file = st.file_uploader("Drop target document here for corporate-grade forensic evaluation", type="pdf", key="forensic_upload")
 
     def analyze_pdf_advanced(file_bytes):
         results = {
             "incremental_updates": 0, "xref_tables": 0, "font_anomalies": 0,
             "is_edited": False, "tamper_lock": False, "metadata": {},
-            "detailed_findings": [], "edited_segments": [], "producer": "Unknown", "dates_match": "Verified"
+            "detailed_findings": [], "edited_segments": [],
+            "inferred_tool": "None Detected",
+            "device_details": "None Detected",
+            "location_data": "None Detected",
+            "timeline_analysis": "Consistent"
         }
         
+        # Gather basic structure values
         eof_markers = re.findall(b'%%EOF', file_bytes)
         xref_markers = re.findall(b'xref', file_bytes)
         results["incremental_updates"] = len(eof_markers)
         results["xref_tables"] = len(xref_markers)
 
+        # --- PHASE 1: VISUAL LAYER & INJECTION SCAN ---
         try:
             doc_fitz = fitz.open(stream=file_bytes, filetype="pdf")
             for page_num in range(len(doc_fitz)):
@@ -69,10 +79,15 @@ if app_mode == "🔍 PDF Forensic Analyzer":
                 text_blocks = page.get_text("blocks")
                 for block in text_blocks:
                     block_text = block[4].strip()
-                    if any(marker in block_text.lower() for marker in ["ilovepdf", "smallpdf", "watermark", "eval", "sejda", "pdfescape", "pdf2go"]):
+                    
+                    # Match known editing patterns or web strings
+                    matched_indicators = [marker for marker in ["ilovepdf", "smallpdf", "watermark", "eval", "sejda", "pdfescape", "pdf2go"] if marker in block_text.lower()]
+                    if matched_indicators:
                         results["tamper_lock"] = True
-                        results["edited_segments"].append(f"Page {page_num + 1} Editor Injection Block: '{block_text}'")
+                        results["inferred_tool"] = matched_indicators[0].upper()
+                        results["edited_segments"].append(f"Page {page_num + 1} Overlay Segment: '{block_text}'")
             
+            # Analyze fonts
             all_fonts = []
             for page in doc_fitz:
                 all_fonts.extend([f[3] for f in page.get_fonts() if f])
@@ -82,33 +97,63 @@ if app_mode == "🔍 PDF Forensic Analyzer":
         except Exception as e:
             results["detailed_findings"].append({"title": "Forensic Parse Interruption", "text": str(e)})
 
+        # --- PHASE 2: EXTENDED DICTIONARY & HARDWARE FORENSICS ---
         try:
             pdf_file = io.BytesIO(file_bytes)
             reader = pypdf.PdfReader(pdf_file)
             metadata = reader.metadata
+            
             if metadata:
                 cleaned_meta = {k.replace('/', ''): str(v) for k, v in metadata.items()}
                 results["metadata"] = cleaned_meta
-                raw_producer = cleaned_meta.get("Producer", "Unknown")
-                results["producer"] = raw_producer[:20] + "..." if len(raw_producer) > 20 else raw_producer
                 
-                producer_lower = raw_producer.lower()
-                suspicious_tools = ["ilovepdf", "smallpdf", "pdf2go", "nitro", "soda", "libreoffice", "canva", "pdfescape", "sejda"]
+                # Extract Device / Creator Footprints
+                creator = cleaned_meta.get("Creator", "")
+                producer = cleaned_meta.get("Producer", "")
+                
+                device_markers = []
+                if creator: device_markers.append(f"Creator Application: {creator}")
+                if producer: device_markers.append(f"Production Engine: {producer}")
+                if device_markers:
+                    results["device_details"] = " | ".join(device_markers)
+                
+                # Check for explicit third-party editor footprints in metadata strings
+                producer_lower = producer.lower() + creator.lower()
+                suspicious_tools = ["ilovepdf", "smallpdf", "pdf2go", "nitro", "soda", "libreoffice", "canva", "pdfescape", "sejda", "acrobat"]
                 for tool in suspicious_tools:
                     if tool in producer_lower:
-                        results["tamper_lock"] = True
+                        if tool != "acrobat" or len(eof_markers) > 1: # Adobe Acrobat is dual-use, check if combined with multi-save
+                            results["tamper_lock"] = True
+                            results["inferred_tool"] = tool.upper()
+
+                # Extract Timeline & Location Metadata
+                create_date = cleaned_meta.get("CreationDate", "")
+                mod_date = cleaned_meta.get("ModDate", "")
                 
-                create_date = cleaned_meta.get("CreationDate")
-                mod_date = cleaned_meta.get("ModDate")
                 if create_date and mod_date and create_date != mod_date:
-                    results["dates_match"] = "Mismatch"
+                    results["timeline_analysis"] = "Chronology Conflict (Altered Post-Creation)"
+                    
+                    # Parse out time zones if present in standard PDF format D:YYYYMMDDHHMMSSOHH'mm'
+                    tz_match = re.search(r'([+-]\d{2}\'\d{2}\')', mod_date)
+                    if tz_match:
+                        results["location_data"] = f"Time Zone Offset at Modification: GMT {tz_match.group(1).replace(\"'\", ':').strip(':')}"
+                
+                # Advanced GPS Sub-dictionary Parsing (if it came from a mobile capture/scanner app with active location tracking)
+                for key, val in cleaned_meta.items():
+                    if "gps" in key.lower() or "location" in key.lower():
+                        results["location_data"] = str(val)
         except:
             pass
 
+        # --- PHASE 3: EVALUATE TARGET MATRIX RULES ---
         if results["tamper_lock"] or len(results["edited_segments"]) > 0:
             results["is_edited"] = True
-        elif results["font_anomalies"] > 0 and results["dates_match"] == "Mismatch":
+        elif results["font_anomalies"] > 0 and results["timeline_analysis"] != "Consistent":
             results["is_edited"] = True
+            results["detailed_findings"].append({
+                "title": "⚠️ Targeted Structural Layout Revision",
+                "text": "Detected localized typographic anomalies alongside an altered post-creation timestamp timeline conflict. This is a signature of targeted item modification."
+            })
         else:
             results["is_edited"] = False
 
@@ -116,18 +161,18 @@ if app_mode == "🔍 PDF Forensic Analyzer":
 
     if uploaded_file is not None:
         file_bytes = uploaded_file.read()
-        with st.spinner("PDF BUSTER running structural isolation layers..."):
+        with st.spinner("PDF BUSTER extracting device manifests and tracking environmental signatures..."):
             analysis = analyze_pdf_advanced(file_bytes)
             
         st.write("")
         if analysis["tamper_lock"]:
-            st.error("🚨 **PDF BUSTER VERDICT: RED FLAG (100% TAMPERED)**", icon="🛑")
+            st.error("🚨 **PDF BUSTER VERDICT: FULL RED FLAG (110% TAMPERED)**", icon="🛑")
             card_class = "alert-active"
         elif analysis["is_edited"]:
-            st.warning("⚠️ **PDF BUSTER VERDICT: CAUTION (Please verify)**", icon="⚡")
+            st.warning("⚠️ **PDF BUSTER VERDICT: CAUTION (MANIPULATION INDICATORS FOUND)**", icon="⚡")
             card_class = "caution-active"
         else:
-            st.success("🛡️ **PDF BUSTER VERDICT: DOCUMENT SECURE / STRUCTURALLY CLEAN**", icon="✅")
+            st.success("🛡️ **PDF BUSTER VERDICT: DOCUMENT SECURE / SAFE TO PROCEED**", icon="✅")
             card_class = "clean-active"
             
         metrics_html = (
@@ -138,6 +183,31 @@ if app_mode == "🔍 PDF Forensic Analyzer":
             f'</div>'
         )
         st.html(metrics_html)
+        
+        # --- NEW SECTION: DEVICE, TOOL, AND LOCATION EVIDENCE OVERLAY ---
+        st.subheader("🕵️‍♂️ Hardware & Software Environmental Trace")
+        st.caption("Extracted device origin profiles and manipulation vectors discovered in the background object tree:")
+        
+        evidence_html = f"""
+        <div class="evidence-box">
+            <div class="evidence-item"><span class="evidence-label">🛠️ Identified Modification Tool:</span> {analysis['inferred_tool']}</div>
+            <div class="evidence-item"><span class="evidence-label">💻 Origin Device/Engine Profile:</span> {analysis['device_details']}</div>
+            <div class="evidence-item"><span class="evidence-label">📍 Located Tracking/Timezone:</span> {analysis['location_data']}</div>
+            <div class="evidence-item"><span class="evidence-label">📅 Timeline State:</span> {analysis['timeline_analysis']}</div>
+        </div>
+        """
+        st.html(evidence_html)
+        
+        st.subheader("🎯 Isolated Edited Portions & Modifications")
+        if analysis["edited_segments"]:
+            for segment in analysis["edited_segments"]:
+                st.html(f'<div style="padding:10px; background-color:#fff2f2; border-left:4px solid #ff4b4b; border-radius:4px; margin-bottom:8px; font-family:monospace; font-size:12.5px; color:#990000;">⚠️ {segment}</div>')
+        else:
+            st.info("No localized text overrides or individual section patches detected on the visual document layer.")
+            
+        st.subheader("📋 Structural Forensics Log")
+        for finding in analysis["detailed_findings"]:
+            st.html(f'<div class="detail-block"><div class="detail-title">{finding["title"]}</div><div class="detail-text">{finding["text"]}</div></div>')
 
 # -------------------------------------------------------------
 # MODE B: UNIVERSAL PDF TO WORD CONVERTER (OCR & NON-OCR)
@@ -150,27 +220,18 @@ elif app_mode == "📄 Universal PDF to Word Converter":
     
     def convert_pdf_to_docx(file_bytes):
         doc = Document()
-        
-        # Setup clean uniform margins
         for section in doc.sections:
             section.top_margin = Inches(1)
             section.bottom_margin = Inches(1)
             section.left_margin = Inches(1)
             section.right_margin = Inches(1)
             
-        # Open document using PyMuPDF (Handles layout layers robustly)
         pdf_stream = fitz.open(stream=file_bytes, filetype="pdf")
-        
         for page_num in range(len(pdf_stream)):
             page = pdf_stream[page_num]
-            
-            # Extract standard layout blocks
             text_blocks = page.get_text("blocks")
             
-            # --- SCANNED / OCR LAYER DETECTION ---
-            # If a page contains no digital text blocks but has images, we pull alternative text layers
             if not text_blocks or len(text_blocks) == 0:
-                # Fallback to search embedded draw strings or canvas metadata text layers
                 tp_text = page.get_text("text")
                 if tp_text.strip():
                     p = doc.add_paragraph()
@@ -179,25 +240,20 @@ elif app_mode == "📄 Universal PDF to Word Converter":
                     p = doc.add_paragraph()
                     p.add_run(f"--- [Page {page_num + 1}: Scanned Image Content - Layout Flattened] ---").italic = True
             else:
-                # Sort blocks top-to-bottom, left-to-right to preserve natural multi-column reading flow
                 text_blocks.sort(key=lambda b: (b[1], b[0]))
-                
                 for block in text_blocks:
                     block_text = block[4].strip()
                     if block_text:
                         p = doc.add_paragraph()
                         p.paragraph_format.space_after = Pt(6)
                         p.paragraph_format.line_spacing = 1.15
-                        
                         run = p.add_run(block_text)
                         run.font.name = 'Calibri'
                         run.font.size = Pt(11)
                         
-            # Add a clean page break between pages unless it's the last page
             if page_num < len(pdf_stream) - 1:
                 doc.add_page_break()
                 
-        # Write directly to system binary buffer
         output_stream = io.BytesIO()
         doc.save(output_stream)
         output_stream.seek(0)
@@ -205,19 +261,15 @@ elif app_mode == "📄 Universal PDF to Word Converter":
 
     if uploaded_pdf is not None:
         file_bytes = uploaded_pdf.read()
-        
-        # 1. Capture the exact original filename and construct the matching .docx title
         original_name = uploaded_pdf.name
         base_filename, _ = os.path.splitext(original_name)
         target_docx_name = f"{base_filename}.docx"
         
         st.success(f"Successfully loaded: `{original_name}`")
-        
         with st.spinner("Re-mapping text and image layers to editable DOCX matrix..."):
             converted_docx = convert_pdf_to_docx(file_bytes)
             
         st.write("")
-        # 2. Dynamic Download Button featuring the exact matching target filename
         st.download_button(
             label=f"📥 Download Editable Word File ({target_docx_name})",
             data=converted_docx,
