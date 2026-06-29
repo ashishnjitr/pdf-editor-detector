@@ -136,9 +136,10 @@ if app_mode == "🔍 PDF Forensic Analyzer":
                     # Parse out time zones if present in standard PDF format D:YYYYMMDDHHMMSSOHH'mm'
                     tz_match = re.search(r'([+-]\d{2}\'\d{2}\')', mod_date)
                     if tz_match:
-                        results["location_data"] = f"Time Zone Offset at Modification: GMT {tz_match.group(1).replace(\"'\", ':').strip(':')}"
+                        clean_tz = tz_match.group(1).replace("'", ":").strip(":")
+                        results["location_data"] = f"Time Zone Offset at Modification: GMT {clean_tz}"
                 
-                # Advanced GPS Sub-dictionary Parsing (if it came from a mobile capture/scanner app with active location tracking)
+                # Advanced GPS Sub-dictionary Parsing
                 for key, val in cleaned_meta.items():
                     if "gps" in key.lower() or "location" in key.lower():
                         results["location_data"] = str(val)
@@ -184,7 +185,7 @@ if app_mode == "🔍 PDF Forensic Analyzer":
         )
         st.html(metrics_html)
         
-        # --- NEW SECTION: DEVICE, TOOL, AND LOCATION EVIDENCE OVERLAY ---
+        # --- DEVICE, TOOL, AND LOCATION EVIDENCE OVERLAY ---
         st.subheader("🕵️‍♂️ Hardware & Software Environmental Trace")
         st.caption("Extracted device origin profiles and manipulation vectors discovered in the background object tree:")
         
