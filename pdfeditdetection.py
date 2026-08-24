@@ -11,10 +11,10 @@ from datetime import datetime
 
 # 1. Page Configuration & Styling
 st.set_page_config(
-    page_title="PDF BUSTER // Forensic & Conversion Suite", 
+    page_title="PDF BUSTER // Forensic, Conversion & Sanitizer Suite", 
     page_icon="💥", 
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 STYLE_INJECTION = """
@@ -39,16 +39,20 @@ STYLE_INJECTION = """
 st.html(STYLE_INJECTION)
 
 st.html('<div class="brand-title">💥 PDF BUSTER</div>')
-st.html('<div class="brand-tagline">Deep Forensics, Visual Heatmaps & Batch Conversion Engine</div>')
+st.html('<div class="brand-tagline">Deep Forensics, Batch Conversion & Privacy Sanitizer Engine</div>')
 
 st.sidebar.markdown("### 🛠️ Mode Selection")
 app_mode = st.sidebar.radio(
     "Choose Utility Interface:",
-    ["🔍 Batch PDF Forensic Analyzer", "📄 Universal PDF to Word Converter"]
+    [
+        "🔍 Batch PDF Forensic Analyzer", 
+        "📄 Universal PDF to Word Converter",
+        "🧼 PDF Privacy Sanitizer & Metadata Wiper"
+    ]
 )
 
 # -------------------------------------------------------------
-# MODE A: BATCH FORENSIC ANALYZER + VISUAL HEATMAP + AUDIT LOG
+# MODE A: BATCH FORENSIC ANALYZER + VISUAL REDLINING + AUDIT LOG
 # -------------------------------------------------------------
 if app_mode == "🔍 Batch PDF Forensic Analyzer":
     st.subheader("Deep-Object Tampering & Visual Redlining")
@@ -81,7 +85,6 @@ if app_mode == "🔍 Batch PDF Forensic Analyzer":
         results["incremental_updates"] = len(eof_markers)
         results["xref_tables"] = len(xref_markers)
 
-        # 1. Visual & Font Analysis via PyMuPDF
         try:
             doc_fitz = fitz.open(stream=file_bytes, filetype="pdf")
             for page_num in range(len(doc_fitz)):
@@ -98,12 +101,10 @@ if app_mode == "🔍 Batch PDF Forensic Analyzer":
                         results["inferred_tool"] = matched_indicators[0].upper()
                         results["edited_segments"].append(f"Page {page_num + 1}: '{block_text}'")
                         
-                        # Draw Red Bounding Box on visual map
                         rect = fitz.Rect(block[:4])
                         page.draw_rect(rect, color=(1, 0, 0), width=2)
                         page_has_suspicious_blocks = True
                 
-                # Render page image if redlined or for inspection
                 pix = page.get_pixmap(dpi=130)
                 img_bytes = pix.tobytes("png")
                 results["annotated_images"].append((page_num + 1, img_bytes, page_has_suspicious_blocks))
@@ -117,7 +118,6 @@ if app_mode == "🔍 Batch PDF Forensic Analyzer":
         except Exception as e:
             results["detailed_findings"].append({"title": "Parse Interruption", "text": str(e)})
 
-        # 2. Metadata Extraction
         try:
             pdf_file = io.BytesIO(file_bytes)
             reader = pypdf.PdfReader(pdf_file)
@@ -151,7 +151,6 @@ if app_mode == "🔍 Batch PDF Forensic Analyzer":
         except:
             pass
 
-        # 3. Verdict Matrix
         if results["tamper_lock"] or len(results["edited_segments"]) > 0:
             results["is_edited"] = True
             results["verdict"] = "FULL RED FLAG"
@@ -206,7 +205,6 @@ Generated automatically by PDF BUSTER Digital Forensics Core.
                 res = analyze_single_pdf(file_bytes, up_file.name)
                 batch_results.append(res)
         
-        # Batch Overview Table
         st.markdown("### 📊 Batch Pipeline Summary")
         summary_data = []
         for r in batch_results:
@@ -223,7 +221,6 @@ Generated automatically by PDF BUSTER Digital Forensics Core.
         st.markdown("---")
         st.markdown("### 🔍 Granular Document Inspections")
         
-        # Per-file collapsible inspections
         for r in batch_results:
             expander_title = f"{'🛑' if r['verdict'] == 'FULL RED FLAG' else ('⚠️' if r['verdict'] == 'CAUTION' else '🛡️')} {r['filename']} — Verdict: {r['verdict']}"
             with st.expander(expander_title, expanded=(len(batch_results) == 1)):
@@ -248,7 +245,6 @@ Generated automatically by PDF BUSTER Digital Forensics Core.
                 """
                 st.html(evidence_html)
                 
-                # Visual Redline Heatmap Rendering
                 st.markdown("**🖼️ Visual Document Redlining Heatmap**")
                 cols = st.columns(min(len(r["annotated_images"]), 3))
                 for idx, (p_num, img_b, is_flagged) in enumerate(r["annotated_images"]):
@@ -256,7 +252,6 @@ Generated automatically by PDF BUSTER Digital Forensics Core.
                         caption = f"Page {p_num} {'(🚨 Overlay Flagged)' if is_flagged else '(Clean)'}"
                         st.image(img_b, caption=caption, use_container_width=True)
                 
-                # Audit Certificate Download
                 cert_bytes = generate_certificate(r)
                 st.download_button(
                     label=f"📜 Download Forensic Audit Certificate ({r['filename']})",
@@ -331,5 +326,78 @@ elif app_mode == "📄 Universal PDF to Word Converter":
             data=docx_data,
             file_name=target_docx_name,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True
+        )
+
+# -------------------------------------------------------------
+# MODE C: HIDDEN DATA & PRIVACY SANITIZER (DE-TAMPER & SCRUB)
+# -------------------------------------------------------------
+elif app_mode == "🧼 PDF Privacy Sanitizer & Metadata Wiper":
+    st.subheader("Document Privacy Sanitizer & Layer De-Tampering")
+    st.markdown("Completely strip internal tracking signatures, wipe metadata logs, and flatten visual layers to prevent reverse-engineering of edits.")
+    
+    sanitize_upload = st.file_uploader("Upload PDF to sanitize and scrub", type=["pdf"], key="sanitizer_upload")
+    
+    flatten_option = st.checkbox("Flatten visual layers (Convert pages to pristine, uneditable image streams to burn out white-outs)", value=True)
+    
+    def sanitize_pdf_document(file_bytes, flatten=True):
+        src_doc = fitz.open(stream=file_bytes, filetype="pdf")
+        clean_doc = fitz.open()
+        
+        if flatten:
+            for page in src_doc:
+                pix = page.get_pixmap(dpi=200)
+                img_bytes = pix.tobytes("png")
+                img_doc = fitz.open(stream=img_bytes, filetype="png")
+                rect = img_doc[0].rect
+                pdfbytes = img_doc.convert_to_pdf()
+                img_pdf = fitz.open("pdf", pdfbytes)
+                page_clean = clean_doc.new_page(width=rect.width, height=rect.height)
+                page_clean.show_pdf_page(rect, img_pdf, 0)
+        else:
+            clean_doc.insert_pdf(src_doc)
+            
+        clean_doc.set_metadata({
+            "format": "PDF 1.7",
+            "title": "",
+            "author": "",
+            "subject": "",
+            "keywords": "",
+            "creator": "Clean PDF Standard",
+            "producer": "System Native Engine",
+            "creationDate": "",
+            "modDate": "",
+            "trapped": "False"
+        })
+        
+        output_stream = io.BytesIO()
+        clean_doc.save(
+            output_stream,
+            garbage=4,
+            deflate=True,
+            clean=True,
+            deflate_images=True,
+            deflate_fonts=True
+        )
+        output_stream.seek(0)
+        return output_stream.getvalue()
+
+    if sanitize_upload is not None:
+        file_bytes = sanitize_upload.read()
+        base_name, _ = os.path.splitext(sanitize_upload.name)
+        sanitized_filename = f"{base_name}_sanitized.pdf"
+        
+        st.info(f"Loaded `{sanitize_upload.name}` for privacy scrubbing.")
+        
+        with st.spinner("Scrubbing metadata headers and purging revision trails..."):
+            cleaned_pdf_bytes = sanitize_pdf_document(file_bytes, flatten=flatten_option)
+            
+        st.success("Document successfully sanitized! All tracking footprints and revision trailers have been purged.")
+        
+        st.download_button(
+            label=f"📥 Download Sanitized PDF ({sanitized_filename})",
+            data=cleaned_pdf_bytes,
+            file_name=sanitized_filename,
+            mime="application/pdf",
             use_container_width=True
         )
