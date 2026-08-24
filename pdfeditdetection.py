@@ -11,7 +11,7 @@ from datetime import datetime
 
 # 1. Page Configuration & Styling
 st.set_page_config(
-    page_title="PDF BUSTER // Forensic, Conversion & Sanitizer Suite", 
+    page_title="PDF BUSTER", 
     page_icon="💥", 
     layout="wide",
     initial_sidebar_state="expanded"
