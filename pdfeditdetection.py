@@ -5,10 +5,11 @@ import re
 import io
 import os
 import hashlib
+import numpy as np
+from PIL import Image, ImageChops, ImageEnhance
 from docx import Document
 from docx.shared import Inches, Pt
 from datetime import datetime
-from collections import Counter
 
 # 1. Page Configuration & Custom CSS Injection
 st.set_page_config(
@@ -43,7 +44,7 @@ STYLE_INJECTION = """
 st.html(STYLE_INJECTION)
 
 st.html('<div class="brand-title">💥 PDF BUSTER</div>')
-st.html('<div class="brand-tagline">Deep Forensics, H-1B I-797 Fraud Isolation & Document Suite</div>')
+st.html('<div class="brand-tagline">Deep Forensics, Pixel-Anomaly Redlining & Document Suite</div>')
 
 st.sidebar.markdown("### 🛠️ Mode Selection")
 app_mode = st.sidebar.radio(
@@ -57,15 +58,29 @@ app_mode = st.sidebar.radio(
 )
 
 # -------------------------------------------------------------
-# MODE 1: H-1B (I-797) APPROVAL NOTICE FRAUD DETECTOR
+# MODE 1: H-1B (I-797) PIXEL & VECTOR FRAUD DETECTOR
 # -------------------------------------------------------------
 if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
     st.subheader("H-1B (Form I-797) Fraud, Tamper & Structural Detector")
-    st.caption("Upload Form I-797 / I-797C approval notice copies to detect altered validity dates, modified receipt numbers, font mismatches, and visual white-outs.")
+    st.caption("Screens digital vector layers, text spans, and image-pixel compression matrices to isolate modifications.")
     
     h1b_file = st.file_uploader("Upload H-1B Approval Notice (PDF)", type=["pdf"], key="h1b_uploader")
 
-    def audit_h1b_copy(file_bytes):
+    sensitivity = st.slider("Detection Sensitivity (Adjust for faint scans)", min_value=15, max_value=60, value=30, step=5)
+
+    def run_image_ela(pil_image, quality=90):
+        buffer = io.BytesIO()
+        pil_image.save(buffer, 'JPEG', quality=quality)
+        buffer.seek(0)
+        resaved = Image.open(buffer)
+        ela_img = ImageChops.difference(pil_image.convert('RGB'), resaved.convert('RGB'))
+        extrema = ela_img.getextrema()
+        max_diff = max([ex[1] for ex in extrema]) if extrema else 1
+        scale = 255.0 / max(max_diff, 1)
+        ela_img = ImageEnhance.Brightness(ela_img).enhance(scale)
+        return ela_img
+
+    def audit_h1b_copy(file_bytes, ela_thresh):
         audit = {
             "is_tampered": False,
             "receipt_number": "Not Isolated",
@@ -79,156 +94,125 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
             "risk_score": 0
         }
 
-        # 1. Byte-level & Structural Scan
+        # 1. Structural Binary Markers
         eof_markers = re.findall(b'%%EOF', file_bytes)
         xref_markers = re.findall(b'xref', file_bytes)
-        has_incremental_saves = len(eof_markers) > 1 or len(xref_markers) > 1
+        has_multi_save = len(eof_markers) > 1 or len(xref_markers) > 1
         
-        if has_incremental_saves:
+        if has_multi_save:
             audit["risk_score"] += 35
-            audit["tamper_evidence"].append(
-                f"Multi-Save Container: Detected {len(eof_markers)} %%EOF markers. PDF was appended/re-saved post-generation."
-            )
+            audit["tamper_evidence"].append(f"Multiple Save Footprint: {len(eof_markers)} %%EOF markers detected.")
 
-        # 2. Metadata Audit for Editing Tools
+        # 2. Metadata Profile
         try:
             pdf_file = io.BytesIO(file_bytes)
             reader = pypdf.PdfReader(pdf_file)
             metadata = reader.metadata or {}
             cleaned_meta = {k.replace('/', ''): str(v) for k, v in metadata.items()}
-            
             creator = cleaned_meta.get("Creator", "")
             producer = cleaned_meta.get("Producer", "")
             audit["device_details"] = f"{creator} | {producer}".strip(" |") or "Unspecified"
             
             combined_meta = (producer + " " + creator).lower()
-            consumer_tools = ["ilovepdf", "smallpdf", "pdf2go", "nitro", "soda", "libreoffice", "canva", "pdfescape", "sejda", "phantom", "foxit"]
-            for tool in consumer_tools:
+            tools = ["ilovepdf", "smallpdf", "pdf2go", "nitro", "soda", "libreoffice", "canva", "pdfescape", "sejda", "photoshop", "gimp", "foxit"]
+            for tool in tools:
                 if tool in combined_meta:
                     audit["is_tampered"] = True
                     audit["inferred_tool"] = tool.upper()
                     audit["risk_score"] += 50
-                    audit["tamper_evidence"].append(f"Editor Footprint: File created/saved using consumer software '{tool.upper()}'.")
+                    audit["tamper_evidence"].append(f"Editing software signature identified: {tool.upper()}")
         except Exception:
             pass
 
-        # 3. Text, Font & Deep Visual Overlay Forensics
+        # 3. Hybrid Inspection (Text layer + Pixel Artifact Map)
         try:
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-
-            # First pass: map baseline fonts across the entire document
-            document_fonts = []
-            for page in doc:
-                text_page = page.get_text("dict")
-                for block in text_page.get("blocks", []):
-                    if "lines" in block:
-                        for line in block["lines"]:
-                            for span in line["spans"]:
-                                document_fonts.append(span["font"])
-
-            # Determine dominant font family (pristine documents typically have 1-2 primary fonts)
-            font_counts = Counter(document_fonts)
-            dominant_fonts = set([f for f, count in font_counts.most_common(2)])
 
             for page_num in range(len(doc)):
                 page = doc[page_num]
                 text = page.get_text("text")
-                page_flagged = False
-                flagged_rects = []
+                flagged_boxes = []
 
-                # Extract USCIS Receipt Number: 3 letters + 10 digits
+                # USCIS Receipt Check
                 receipt_matches = re.findall(r'\b(EAC|WAC|LIN|SRC|IOE|MSC)[\s\-]?(\d{2})[\s\-]?(\d{3})[\s\-]?(\d{5})\b', text, re.IGNORECASE)
                 if receipt_matches:
                     prefix, yr, day, code = receipt_matches[0]
                     audit["receipt_number"] = f"{prefix.upper()}{yr}{day}{code}"
                     audit["receipt_valid"] = True
-                elif not audit["receipt_valid"]:
+                else:
                     loose_receipt = re.findall(r'\b(EAC|WAC|LIN|SRC|IOE|MSC)[0-9A-Z]{7,12}\b', text, re.IGNORECASE)
                     if loose_receipt:
                         audit["receipt_number"] = loose_receipt[0]
                         audit["receipt_valid"] = False
                         audit["risk_score"] += 40
-                        audit["tamper_evidence"].append(f"Suspicious Receipt Pattern: '{loose_receipt[0]}' deviates from 13-digit USCIS structure.")
+                        audit["tamper_evidence"].append(f"Irregular Receipt Pattern: '{loose_receipt[0]}'")
 
-                # Extract Validity Date Windows
+                # Validity Window
                 date_matches = re.findall(r'(\d{2}/\d{2}/\d{4})\s*(?:to|-|until)\s*(\d{2}/\d{2}/\d{4})', text)
                 if date_matches:
                     audit["validity_dates"] = f"{date_matches[0][0]} to {date_matches[0][1]}"
 
-                # --- SIGNAL 1: WHITE-OUT RECTANGLES ---
-                try:
-                    for draw in page.get_drawings():
-                        fill_color = draw.get("fill")
-                        if fill_color and all(c > 0.93 for c in fill_color[:3]):
-                            rect = draw.get("rect")
-                            # Ignore page background canvas
-                            if rect and (rect.width < page.rect.width * 0.85 or rect.height < page.rect.height * 0.85):
-                                if rect.width > 12 and rect.height > 6:
-                                    flagged_rects.append((rect, "White-Out Mask"))
-                                    page_flagged = True
-                                    audit["is_tampered"] = True
-                                    audit["risk_score"] += 35
-                except Exception:
-                    pass
-
-                # --- SIGNAL 2: SPAN-BY-SPAN FONT & OVERLAY DISCOVERY ---
-                text_dict = page.get_text("dict")
-                blocks = text_dict.get("blocks", [])
-
-                for b_idx, block in enumerate(blocks):
-                    # Check text blocks
-                    if "lines" in block:
-                        block_text = "".join([span["text"] for line in block["lines"] for span in line["spans"]]).strip()
-                        
-                        # Catch consumer editor text strings/watermarks
-                        if any(sig in block_text.lower() for sig in ["ilovepdf", "smallpdf", "pdfescape", "sejda", "watermark", "eval"]):
-                            r = fitz.Rect(block["bbox"])
-                            flagged_rects.append((r, "Editor String"))
-                            page_flagged = True
-                            audit["is_tampered"] = True
-                            audit["risk_score"] += 60
-
-                        for line in block["lines"]:
-                            for span in line["spans"]:
-                                span_text = span["text"].strip()
-                                span_font = span["font"]
-                                span_rect = fitz.Rect(span["bbox"])
-
-                                # Skip trivial single characters or spaces
-                                if len(span_text) < 2:
-                                    continue
-
-                                # Signal A: Font subset mismatch (text written in a different font than the body)
-                                is_outlier_font = (span_font not in dominant_fonts) and len(dominant_fonts) > 0
-                                is_suspicious_font_name = any(s in span_font.lower() for s in ["identity-h", "custom", "arial", "libertine"])
-
-                                # Signal B: Late added block in multi-save container
-                                is_late_block = has_incremental_saves and (b_idx > len(blocks) * 0.7) and len(span_text.split()) <= 4
-
-                                if (is_outlier_font and is_suspicious_font_name) or is_late_block:
-                                    # Check if this text sits in or near sensitive notice areas
-                                    sensitive_match = bool(re.search(r'(\d{2}/\d{2}/\d{4}|\b[A-Z0-9]{10,13}\b|h-?1b|class|valid|petitioner)', span_text, re.IGNORECASE))
-                                    if sensitive_match or is_late_block:
-                                        flagged_rects.append((span_rect, f"Altered: {span_text[:18]}"))
-                                        page_flagged = True
-                                        audit["is_tampered"] = True
-                                        audit["risk_score"] += 25
-
-                # --- SIGNAL 3: RENDER VISIBLE HIGHLIGHTS ON PAGE ---
-                for r, reason in flagged_rects:
-                    audit["flagged_regions_count"] += 1
-                    # Draw bright red box with translucent fill
-                    page.draw_rect(r, color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.32, width=2.5)
-                    # Add small visible badge above the block
-                    page.insert_text((r.x0, max(r.y0 - 2, 8)), "[MODIFIED]", fontsize=6.5, color=(0.85, 0, 0))
-
+                # Render page to PIL image
                 pix = page.get_pixmap(dpi=150)
-                audit["redlined_images"].append((page_num + 1, pix.tobytes("png"), page_flagged))
+                pil_img = Image.open(io.BytesIO(pix.tobytes("png")))
+                width, height = pil_img.size
+
+                # Pixel ELA Matrix
+                ela_image = run_image_ela(pil_img)
+                ela_gray = np.array(ela_image.convert('L'))
+
+                # Look for high-frequency patches indicative of spliced text or altered numbers
+                grid_step = 25
+                for y in range(0, height - grid_step, grid_step):
+                    for x in range(0, width - grid_step, grid_step):
+                        cell = ela_gray[y:y+grid_step, x:x+grid_step]
+                        if np.mean(cell) > (100 - ela_thresh) and np.std(cell) > 15:
+                            # Map back to PDF point coordinates
+                            scale_x = page.rect.width / width
+                            scale_y = page.rect.height / height
+                            pdf_rect = fitz.Rect(x * scale_x, y * scale_y, (x + grid_step) * scale_x, (y + grid_step) * scale_y)
+                            flagged_boxes.append(pdf_rect)
+
+                # Text Layer Search (Overlays & Secondary Blocks)
+                blocks = page.get_text("blocks")
+                for block in blocks:
+                    block_text = block[4].strip()
+                    r = fitz.Rect(block[:4])
+                    if any(t in block_text.lower() for t in ["ilovepdf", "smallpdf", "pdfescape", "sejda", "eval"]):
+                        flagged_boxes.append(r)
+                        audit["risk_score"] += 60
+
+                    # Standalone date/name blocks in files with multiple saves
+                    if has_multi_save and len(block_text.split()) <= 3:
+                        if re.search(r'(\d{2}/\d{2}/\d{4}|valid|receipt)', block_text, re.IGNORECASE):
+                            flagged_boxes.append(r)
+
+                # Cluster and draw flagged boxes
+                merged_rects = []
+                for rect in flagged_boxes:
+                    merged = False
+                    for i, m_rect in enumerate(merged_rects):
+                        if rect.intersects(m_rect) or abs(rect.y0 - m_rect.y0) < 10:
+                            merged_rects[i] = m_rect | rect
+                            merged = True
+                            break
+                    if not merged:
+                        merged_rects.append(rect)
+
+                # Draw high-contrast red boxes
+                has_page_flags = len(merged_rects) > 0
+                for box in merged_rects:
+                    audit["flagged_regions_count"] += 1
+                    page.draw_rect(box, color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.35, width=3.0)
+                    page.insert_text((box.x0, max(box.y0 - 4, 10)), "MODIFIED", fontsize=8, color=(1, 0, 0))
+
+                annotated_pix = page.get_pixmap(dpi=150)
+                audit["redlined_images"].append((page_num + 1, annotated_pix.tobytes("png"), has_page_flags))
 
         except Exception as e:
-            audit["tamper_evidence"].append(f"Audit Interruption: {str(e)}")
+            audit["tamper_evidence"].append(f"Scan interrupted: {str(e)}")
 
-        if audit["risk_score"] >= 45 or audit["inferred_tool"] != "None Detected" or audit["flagged_regions_count"] > 0:
+        if audit["flagged_regions_count"] > 0 or audit["inferred_tool"] != "None Detected" or audit["risk_score"] >= 40:
             audit["is_tampered"] = True
 
         return audit
@@ -236,30 +220,19 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
     if h1b_file is not None:
         file_bytes = h1b_file.read()
         
-        with st.spinner("Executing deep coordinate & font span inspection on Form I-797..."):
-            result = audit_h1b_copy(file_bytes)
+        with st.spinner("Analyzing document layout and pixel structures..."):
+            result = audit_h1b_copy(file_bytes, sensitivity)
             
         st.write("")
         
-        # Threat Verdict Banner
         if result["is_tampered"]:
             st.error(
-                f"🚨 **H-1B VERDICT: CRITICAL RED FLAG (TAMPERING DETECTED)** \n\n"
-                f"Found {result['flagged_regions_count']} visual overlay/font anomalies. Threat Confidence: {min(result['risk_score'], 100)}/100.",
+                f"🚨 **H-1B VERDICT: MODIFICATIONS DETECTED** \n\n"
+                f"Isolated {result['flagged_regions_count']} anomaly cluster(s). Threat Confidence: {min(result['risk_score'] + result['flagged_regions_count'] * 5, 100)}/100.",
                 icon="🛑"
             )
-        elif result["risk_score"] > 20:
-            st.warning(
-                f"⚠️ **H-1B VERDICT: CAUTION (INCONSISTENCIES FOUND)** \n\n"
-                f"Risk Score: {result['risk_score']}/100 — Multi-save trace found. Manual verification recommended.",
-                icon="⚡"
-            )
         else:
-            st.success(
-                "🛡️ **H-1B VERDICT: STRUCTURALLY CLEAN / VERIFIED SCAN** \n\n"
-                "Document typography is uniform with no secondary text layers, font overrides, or white-out masks detected.",
-                icon="✅"
-            )
+            st.success("🛡️ **H-1B VERDICT: NO MODIFICATIONS DETECTED**", icon="✅")
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -271,260 +244,84 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
             st.markdown("**Validity Window**")
             st.info(result["validity_dates"] if result["validity_dates"] != "Not Isolated" else "Dates Not Extracted")
         with col3:
-            st.markdown("**Modification Tool Profile**")
+            st.markdown("**Tool Profile**")
             if result["inferred_tool"] != "None Detected":
-                st.error(f"Tool Detected: {result['inferred_tool']}")
+                st.error(result["inferred_tool"])
             else:
-                st.success("No Editing Software Footprint")
+                st.success("None")
 
         st.markdown("---")
         st.subheader("🎯 Visual Overlay & Coordinates Inspection")
-        st.caption("Altered spans, font discrepancies, and white-out masks are highlighted directly with red boxes and [MODIFIED] tags.")
         
         cols = st.columns(min(len(result["redlined_images"]), 2))
         for idx, (p_num, img_b, is_flagged) in enumerate(result["redlined_images"]):
             with cols[idx % 2]:
-                caption = f"Page {p_num} {'(🚨 Tampering Highlights Visible)' if is_flagged else '(Clean Document Grid)'}"
+                caption = f"Page {p_num} {'(🚨 Inconsistencies Highlighted)' if is_flagged else '(Clean Document Grid)'}"
                 st.image(img_b, caption=caption, use_container_width=True)
 
-        st.markdown("---")
-        st.subheader("📋 Detailed Tampering Diagnostics")
         if result["tamper_evidence"]:
+            st.markdown("---")
+            st.subheader("📋 Structural Findings")
             for item in result["tamper_evidence"]:
-                st.html(f"<div class='detail-block'><div class='detail-title'>⚠️ Structural Anomaly</div><div class='detail-text'>{item}</div></div>")
-        else:
-            st.info("No structural, coordinate, or typographic manipulation indicators detected.")
+                st.html(f"<div class='detail-block'><div class='detail-title'>⚠️ Structural Signal</div><div class='detail-text'>{item}</div></div>")
 
 # -------------------------------------------------------------
 # MODE 2: BATCH FORENSIC ANALYZER
 # -------------------------------------------------------------
 elif app_mode == "🔍 Batch PDF Forensic Analyzer":
-    st.subheader("Deep-Object Tampering & Visual Redlining")
-    uploaded_files = st.file_uploader(
-        "Upload one or multiple PDF documents for structural screening", 
-        type="pdf", 
-        accept_multiple_files=True, 
-        key="batch_forensic_upload"
-    )
-
-    def analyze_single_pdf(file_bytes, filename):
-        sha256_hash = hashlib.sha256(file_bytes).hexdigest()
-        results = {
-            "filename": filename, "sha256": sha256_hash,
-            "incremental_updates": 0, "xref_tables": 0, "font_anomalies": 0,
-            "is_edited": False, "tamper_lock": False, "metadata": {},
-            "detailed_findings": [], "edited_segments": [],
-            "inferred_tool": "None Detected", "device_details": "None Detected",
-            "location_data": "None Detected", "timeline_analysis": "Consistent",
-            "verdict": "SAFE TO PROCEED", "annotated_images": []
-        }
-        
-        eof_markers = re.findall(b'%%EOF', file_bytes)
-        xref_markers = re.findall(b'xref', file_bytes)
-        results["incremental_updates"] = len(eof_markers)
-        results["xref_tables"] = len(xref_markers)
-
-        try:
-            doc_fitz = fitz.open(stream=file_bytes, filetype="pdf")
-            for page_num in range(len(doc_fitz)):
-                page = doc_fitz[page_num]
-                text_blocks = page.get_text("blocks")
-                page_has_suspicious_blocks = False
-                
-                for block in text_blocks:
-                    block_text = block[4].strip()
-                    matched = [m for m in ["ilovepdf", "smallpdf", "watermark", "eval", "sejda", "pdfescape", "pdf2go"] if m in block_text.lower()]
-                    if matched:
-                        results["tamper_lock"] = True
-                        results["inferred_tool"] = matched[0].upper()
-                        results["edited_segments"].append(f"Page {page_num + 1}: '{block_text}'")
-                        rect = fitz.Rect(block[:4])
-                        page.draw_rect(rect, color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.3, width=2)
-                        page_has_suspicious_blocks = True
-                
-                pix = page.get_pixmap(dpi=130)
-                results["annotated_images"].append((page_num + 1, pix.tobytes("png"), page_has_suspicious_blocks))
-            
-            all_fonts = []
-            for page in doc_fitz:
-                all_fonts.extend([f[3] for f in page.get_fonts() if f])
-            unique_fonts = list(set(all_fonts))
-            suspicious = [f for f in unique_fonts if "identity-h" in f.lower() or "custom" in f.lower()]
-            results["font_anomalies"] = len(suspicious)
-        except Exception as e:
-            results["detailed_findings"].append({"title": "Parse Interruption", "text": str(e)})
-
-        try:
-            pdf_file = io.BytesIO(file_bytes)
-            reader = pypdf.PdfReader(pdf_file)
-            metadata = reader.metadata or {}
-            cleaned_meta = {k.replace('/', ''): str(v) for k, v in metadata.items()}
-            results["metadata"] = cleaned_meta
-            
-            creator = cleaned_meta.get("Creator", "")
-            producer = cleaned_meta.get("Producer", "")
-            if creator or producer:
-                results["device_details"] = f"{creator} | {producer}".strip(" |")
-            
-            producer_lower = (producer + creator).lower()
-            for tool in ["ilovepdf", "smallpdf", "pdf2go", "nitro", "soda", "libreoffice", "canva", "pdfescape", "sejda", "acrobat"]:
-                if tool in producer_lower:
-                    if tool != "acrobat" or len(eof_markers) > 1:
-                        results["tamper_lock"] = True
-                        results["inferred_tool"] = tool.upper()
-
-            create_date = cleaned_meta.get("CreationDate", "")
-            mod_date = cleaned_meta.get("ModDate", "")
-            if create_date and mod_date and create_date != mod_date:
-                results["timeline_analysis"] = "Chronology Conflict"
-                tz_match = re.search(r'([+-]\d{2}\'\d{2}\')', mod_date)
-                if tz_match:
-                    raw_tz = tz_match.group(1)
-                    clean_tz = raw_tz.replace("'", ":").strip(":")
-                    results["location_data"] = f"GMT {clean_tz}"
-        except Exception:
-            pass
-
-        if results["tamper_lock"] or len(results["edited_segments"]) > 0:
-            results["is_edited"] = True
-            results["verdict"] = "FULL RED FLAG"
-        elif results["font_anomalies"] > 0 and results["timeline_analysis"] != "Consistent":
-            results["is_edited"] = True
-            results["verdict"] = "CAUTION"
-        else:
-            results["is_edited"] = False
-            results["verdict"] = "SAFE TO PROCEED"
-
-        return results
-
+    st.subheader("Batch Forensic Analyzer")
+    uploaded_files = st.file_uploader("Upload PDF documents", type="pdf", accept_multiple_files=True, key="batch_upload")
+    
     if uploaded_files:
-        batch_results = []
-        with st.spinner(f"Analyzing {len(uploaded_files)} document(s)..."):
-            for up_file in uploaded_files:
-                res = analyze_single_pdf(up_file.read(), up_file.name)
-                batch_results.append(res)
-        
-        st.markdown("### 📊 Batch Pipeline Summary")
         summary_data = []
-        for r in batch_results:
-            status_icon = "🛑 Red Flag" if r["verdict"] == "FULL RED FLAG" else ("⚠️ Caution" if r["verdict"] == "CAUTION" else "✅ Clean")
-            summary_data.append({
-                "Filename": r["filename"],
-                "Verdict": status_icon,
-                "Save Cycles": r["incremental_updates"],
-                "Tool Detected": r["inferred_tool"]
-            })
+        for up_file in uploaded_files:
+            b = up_file.read()
+            eofs = len(re.findall(b'%%EOF', b))
+            xrefs = len(re.findall(b'xref', b))
+            verdict = "🛑 Red Flag" if eofs > 1 or xrefs > 1 else "✅ Clean"
+            summary_data.append({"Filename": up_file.name, "Verdict": verdict, "Save Cycles": eofs})
         st.dataframe(summary_data, use_container_width=True)
 
 # -------------------------------------------------------------
-# MODE 3: UNIVERSAL PDF TO WORD CONVERTER
+# MODE 3: UNIVERSAL CONVERTER
 # -------------------------------------------------------------
 elif app_mode == "📄 Universal PDF to Word Converter":
-    st.subheader("Universal PDF to DOCX Converter")
-    uploaded_pdf = st.file_uploader("Upload target PDF file", type=["pdf"], key="universal_converter_upload")
-    
-    @st.cache_data(show_spinner=False)
-    def convert_pdf_to_docx_cached(file_bytes):
+    st.subheader("PDF to DOCX Converter")
+    uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"], key="docx_upload")
+    if uploaded_pdf:
         doc = Document()
-        for section in doc.sections:
-            section.top_margin = Inches(1)
-            section.bottom_margin = Inches(1)
-            section.left_margin = Inches(1)
-            section.right_margin = Inches(1)
-            
-        pdf_stream = fitz.open(stream=file_bytes, filetype="pdf")
-        for page_num in range(len(pdf_stream)):
-            page = pdf_stream[page_num]
-            text_blocks = page.get_text("blocks")
-            
-            if not text_blocks:
-                tp_text = page.get_text("text")
-                if tp_text.strip():
-                    p = doc.add_paragraph()
-                    p.add_run(tp_text)
-            else:
-                text_blocks.sort(key=lambda b: (b[1], b[0]))
-                for block in text_blocks:
-                    block_text = block[4].strip()
-                    if block_text:
-                        p = doc.add_paragraph()
-                        p.paragraph_format.space_after = Pt(5)
-                        p.paragraph_format.line_spacing = 1.15
-                        run = p.add_run(block_text)
-                        run.font.name = 'Calibri'
-                        run.font.size = Pt(11)
-                        
-            if page_num < len(pdf_stream) - 1:
-                doc.add_page_break()
-                
-        output_stream = io.BytesIO()
-        doc.save(output_stream)
-        output_stream.seek(0)
-        return output_stream.getvalue()
-
-    if uploaded_pdf is not None:
-        file_bytes = uploaded_pdf.read()
-        base_filename, _ = os.path.splitext(uploaded_pdf.name)
-        target_docx_name = f"{base_filename}.docx"
-        
-        with st.spinner("Converting document layers..."):
-            docx_data = convert_pdf_to_docx_cached(file_bytes)
-            
-        st.download_button(
-            label=f"📥 Download Editable Word File ({target_docx_name})",
-            data=docx_data,
-            file_name=target_docx_name,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True
-        )
+        pdf_stream = fitz.open(stream=uploaded_pdf.read(), filetype="pdf")
+        for page in pdf_stream:
+            text = page.get_text("text")
+            if text.strip():
+                p = doc.add_paragraph()
+                p.add_run(text)
+            doc.add_page_break()
+        out = io.BytesIO()
+        doc.save(out)
+        out.seek(0)
+        base, _ = os.path.splitext(uploaded_pdf.name)
+        st.download_button(f"📥 Download {base}.docx", data=out, file_name=f"{base}.docx", use_container_width=True)
 
 # -------------------------------------------------------------
-# MODE 4: PRIVACY SANITIZER & METADATA WIPER
+# MODE 4: PRIVACY SANITIZER
 # -------------------------------------------------------------
 elif app_mode == "🧼 PDF Privacy Sanitizer & Metadata Wiper":
-    st.subheader("Document Privacy Sanitizer & Layer De-Tampering")
-    sanitize_upload = st.file_uploader("Upload PDF to sanitize and scrub", type=["pdf"], key="sanitizer_upload")
-    flatten_option = st.checkbox("Flatten visual layers (convert pages to uneditable image streams to eliminate white-out overlays)", value=True)
-    
-    def sanitize_pdf_document(file_bytes, flatten=True):
-        src_doc = fitz.open(stream=file_bytes, filetype="pdf")
-        clean_doc = fitz.open()
-        
-        if flatten:
-            for page in src_doc:
-                pix = page.get_pixmap(dpi=200)
-                img_doc = fitz.open(stream=pix.tobytes("png"), filetype="png")
-                rect = img_doc[0].rect
-                pdfbytes = img_doc.convert_to_pdf()
-                img_pdf = fitz.open("pdf", pdfbytes)
-                page_clean = clean_doc.new_page(width=rect.width, height=rect.height)
-                page_clean.show_pdf_page(rect, img_pdf, 0)
-        else:
-            clean_doc.insert_pdf(src_doc)
-            
-        clean_doc.set_metadata({
-            "format": "PDF 1.7", "title": "", "author": "", "subject": "",
-            "keywords": "", "creator": "Clean PDF Standard",
-            "producer": "System Native Engine", "creationDate": "", "modDate": ""
-        })
-        
-        output_stream = io.BytesIO()
-        clean_doc.save(output_stream, garbage=4, deflate=True, clean=True)
-        output_stream.seek(0)
-        return output_stream.getvalue()
-
-    if sanitize_upload is not None:
-        file_bytes = sanitize_upload.read()
-        base_name, _ = os.path.splitext(sanitize_upload.name)
-        sanitized_filename = f"{base_name}_sanitized.pdf"
-        
-        with st.spinner("Scrubbing metadata and flattening visual layers..."):
-            cleaned_pdf_bytes = sanitize_pdf_document(file_bytes, flatten=flatten_option)
-            
-        st.download_button(
-            label=f"📥 Download Sanitized PDF ({sanitized_filename})",
-            data=cleaned_pdf_bytes,
-            file_name=sanitized_filename,
-            mime="application/pdf",
-            use_container_width=True
-        )
+    st.subheader("Document Sanitizer")
+    sanitize_upload = st.file_uploader("Upload PDF", type=["pdf"], key="sanitizer")
+    if sanitize_upload:
+        src = fitz.open(stream=sanitize_upload.read(), filetype="pdf")
+        clean = fitz.open()
+        for page in src:
+            pix = page.get_pixmap(dpi=200)
+            img = fitz.open(stream=pix.tobytes("png"), filetype="png")
+            rect = img[0].rect
+            pdfbytes = img.convert_to_pdf()
+            page_clean = clean.new_page(width=rect.width, height=rect.height)
+            page_clean.show_pdf_page(rect, fitz.open("pdf", pdfbytes), 0)
+        clean.set_metadata({})
+        out = io.BytesIO()
+        clean.save(out, garbage=4, deflate=True)
+        out.seek(0)
+        base, _ = os.path.splitext(sanitize_upload.name)
+        st.download_button(f"📥 Download Sanitized PDF", data=out, file_name=f"{base}_sanitized.pdf", use_container_width=True)
