@@ -128,7 +128,6 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
                     audit["receipt_number"] = f"{prefix.upper()}{yr}{day}{code}"
                     audit["receipt_valid"] = True
                 elif not audit["receipt_valid"]:
-                    # Check for malformed or edited receipts (e.g., incorrect character counts)
                     loose_receipt = re.findall(r'\b(EAC|WAC|LIN|SRC|IOE|MSC)[0-9A-Z]{7,12}\b', text, re.IGNORECASE)
                     if loose_receipt:
                         audit["receipt_number"] = loose_receipt[0]
@@ -145,7 +144,6 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
                 for block in text_blocks:
                     block_text = block[4].strip()
                     
-                    # Flag editor tool text snippets
                     if any(tool_sig in block_text.lower() for tool_sig in ["ilovepdf", "smallpdf", "pdfescape", "sejda", "watermark"]):
                         audit["is_tampered"] = True
                         audit["inferred_tool"] = block_text
@@ -154,24 +152,18 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
                         page.draw_rect(rect, color=(1, 0, 0), width=2.5)
                         page_flagged = True
 
-                    # Target critical fraud fields: modifications around Dates, Case Type, or Names
                     critical_targets = ["beneficiary", "valid from", "class", "receipt number", "notice date", "petitioner"]
                     if any(target in block_text.lower() for target in critical_targets):
-                        # Verify bounding box anomalies (unusual single-word isolated floating overlays)
                         if len(block_text.split()) <= 2 and block[3] - block[1] < 18:
-                            # Flag micro text-boxes placed directly over official fields
                             rect = fitz.Rect(block[:4])
                             page.draw_rect(rect, color=(1, 0.4, 0), width=1.5)
 
-                # Fonts Inspection
                 fonts = [f[3] for f in page.get_fonts() if f]
                 all_page_fonts.extend(fonts)
                 
-                # Render Page with Redlines
                 pix = page.get_pixmap(dpi=150)
                 audit["redlined_images"].append((page_num + 1, pix.tobytes("png"), page_flagged))
 
-            # Audit Fonts for subset conflicts
             unique_fonts = list(set(all_page_fonts))
             suspicious_fonts = [f for f in unique_fonts if any(s in f.lower() for s in ["identity-h", "custom", "arialmt", "libertine"])]
             if len(suspicious_fonts) > 1 and len(eof_markers) > 1:
@@ -196,7 +188,6 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
             
         st.write("")
         
-        # Threat Verdict Banner
         if result["is_tampered"]:
             st.error(
                 f"🚨 **H-1B VERDICT: CRITICAL RED FLAG (TAMPERING DETECTED)** \n\n"
@@ -216,7 +207,6 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
                 icon="✅"
             )
 
-        # Core Field Extraction Cards
         col1, col2, col3 = st.columns(3)
         with col1:
             st.markdown("**USCIS Receipt Number**")
@@ -233,7 +223,6 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
             else:
                 st.success("No Editing Software Signature")
 
-        # Visual Redlining & Heatmap Inspection
         st.markdown("---")
         st.subheader("🎯 Visual Overlay & Coordinates Inspection")
         st.caption("Inspecting critical approval zones (Beneficiary Name, Petition Dates, Wage, Receipt Block). Orange/Red boxes highlight overlaid elements.")
@@ -244,7 +233,6 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
                 caption = f"Page {p_num} {'(🚨 Injected Layers Detected)' if is_flagged else '(Clean Document Grid)'}"
                 st.image(img_b, caption=caption, use_container_width=True)
 
-        # Forensic Audit Details
         st.markdown("---")
         st.subheader("📋 Detailed Tampering Diagnostics")
         if result["tamper_evidence"]:
@@ -337,8 +325,10 @@ elif app_mode == "🔍 Batch PDF Forensic Analyzer":
                 results["timeline_analysis"] = "Chronology Conflict"
                 tz_match = re.search(r'([+-]\d{2}\'\d{2}\')', mod_date)
                 if tz_match:
-                    results["location_data"] = f"GMT {tz_match.group(1).replace(\"'\", ':').strip(':')}"
-        except:
+                    raw_tz = tz_match.group(1)
+                    clean_tz = raw_tz.replace("'", ":").strip(":")
+                    results["location_data"] = f"GMT {clean_tz}"
+        except Exception:
             pass
 
         if results["tamper_lock"] or len(results["edited_segments"]) > 0:
