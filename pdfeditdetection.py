@@ -8,6 +8,7 @@ import hashlib
 from docx import Document
 from docx.shared import Inches, Pt
 from datetime import datetime
+from collections import Counter
 
 # 1. Page Configuration & Custom CSS Injection
 st.set_page_config(
@@ -60,7 +61,7 @@ app_mode = st.sidebar.radio(
 # -------------------------------------------------------------
 if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
     st.subheader("H-1B (Form I-797) Fraud, Tamper & Structural Detector")
-    st.caption("Upload candidate Form I-797 / I-797C approval notice copies to screen validity dates, receipt numbers, font injections, and white-out masks.")
+    st.caption("Upload Form I-797 / I-797C approval notice copies to detect altered validity dates, modified receipt numbers, font mismatches, and visual white-outs.")
     
     h1b_file = st.file_uploader("Upload H-1B Approval Notice (PDF)", type=["pdf"], key="h1b_uploader")
 
@@ -69,12 +70,12 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
             "is_tampered": False,
             "receipt_number": "Not Isolated",
             "receipt_valid": False,
-            "beneficiary_name": "Not Isolated",
             "validity_dates": "Not Isolated",
             "inferred_tool": "None Detected",
             "device_details": "Standard System",
             "tamper_evidence": [],
             "redlined_images": [],
+            "flagged_regions_count": 0,
             "risk_score": 0
         }
 
@@ -107,19 +108,33 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
                     audit["is_tampered"] = True
                     audit["inferred_tool"] = tool.upper()
                     audit["risk_score"] += 50
-                    audit["tamper_evidence"].append(f"Editor Footprint Trapped: File created/saved using '{tool.upper()}'.")
+                    audit["tamper_evidence"].append(f"Editor Footprint: File created/saved using consumer software '{tool.upper()}'.")
         except Exception:
             pass
 
-        # 3. Text, Font & Visual Coordinate Forensics
+        # 3. Text, Font & Deep Visual Overlay Forensics
         try:
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-            all_page_fonts = []
+
+            # First pass: map baseline fonts across the entire document
+            document_fonts = []
+            for page in doc:
+                text_page = page.get_text("dict")
+                for block in text_page.get("blocks", []):
+                    if "lines" in block:
+                        for line in block["lines"]:
+                            for span in line["spans"]:
+                                document_fonts.append(span["font"])
+
+            # Determine dominant font family (pristine documents typically have 1-2 primary fonts)
+            font_counts = Counter(document_fonts)
+            dominant_fonts = set([f for f, count in font_counts.most_common(2)])
 
             for page_num in range(len(doc)):
                 page = doc[page_num]
                 text = page.get_text("text")
                 page_flagged = False
+                flagged_rects = []
 
                 # Extract USCIS Receipt Number: 3 letters + 10 digits
                 receipt_matches = re.findall(r'\b(EAC|WAC|LIN|SRC|IOE|MSC)[\s\-]?(\d{2})[\s\-]?(\d{3})[\s\-]?(\d{5})\b', text, re.IGNORECASE)
@@ -140,95 +155,80 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
                 if date_matches:
                     audit["validity_dates"] = f"{date_matches[0][0]} to {date_matches[0][1]}"
 
-                # Collect fonts used across the page
-                fonts = [f[3] for f in page.get_fonts() if f]
-                all_page_fonts.extend(fonts)
-                unique_page_fonts = list(set(fonts))
-                has_font_anomalies = any("identity-h" in f.lower() or "custom" in f.lower() for f in unique_page_fonts)
-
-                # --- ADVANCED OVERLAY & WHITE-OUT DETECTION ---
-
-                # A. Detect Vector White-Out Masks (Drawings covering text)
+                # --- SIGNAL 1: WHITE-OUT RECTANGLES ---
                 try:
-                    drawings = page.get_drawings()
-                    for draw in drawings:
+                    for draw in page.get_drawings():
                         fill_color = draw.get("fill")
-                        # White fills: RGB close to (1, 1, 1)
-                        if fill_color and all(c > 0.95 for c in fill_color[:3]):
+                        if fill_color and all(c > 0.93 for c in fill_color[:3]):
                             rect = draw.get("rect")
-                            # Ignore full-page background white rectangles
-                            if rect and (rect.width < page.rect.width * 0.9 or rect.height < page.rect.height * 0.9):
-                                if rect.width > 15 and rect.height > 8:  # Typical text patch size
+                            # Ignore page background canvas
+                            if rect and (rect.width < page.rect.width * 0.85 or rect.height < page.rect.height * 0.85):
+                                if rect.width > 12 and rect.height > 6:
+                                    flagged_rects.append((rect, "White-Out Mask"))
                                     page_flagged = True
                                     audit["is_tampered"] = True
                                     audit["risk_score"] += 35
-                                    audit["tamper_evidence"].append(
-                                        f"Page {page_num + 1}: White-out mask detected at coordinates [{int(rect.x0)}, {int(rect.y0)}, {int(rect.x1)}, {int(rect.y1)}]."
-                                    )
-                                    # Highlight white-out region with bold red fill & outline
-                                    page.draw_rect(rect, color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.25, width=2)
                 except Exception:
                     pass
 
-                # B. Inspect Text Spans for Injected / Overlaid Text Blocks
-                page_dict = page.get_text("words")  # List of tuples: (x0, y0, x1, y1, "word", block_no, line_no, word_no)
-                
-                # Check for floating/suspicious words placed over sensitive zones
-                critical_keywords = ["valid", "from", "to", "receipt", "beneficiary", "class", "petitioner", "notice"]
-                sensitive_boxes = []
+                # --- SIGNAL 2: SPAN-BY-SPAN FONT & OVERLAY DISCOVERY ---
+                text_dict = page.get_text("dict")
+                blocks = text_dict.get("blocks", [])
 
-                # Find coordinate bounding boxes of sensitive labels
-                for w in page_dict:
-                    word_lower = w[4].lower().strip(":")
-                    if word_lower in critical_keywords:
-                        sensitive_boxes.append(fitz.Rect(w[:4]))
+                for b_idx, block in enumerate(blocks):
+                    # Check text blocks
+                    if "lines" in block:
+                        block_text = "".join([span["text"] for line in block["lines"] for span in line["spans"]]).strip()
+                        
+                        # Catch consumer editor text strings/watermarks
+                        if any(sig in block_text.lower() for sig in ["ilovepdf", "smallpdf", "pdfescape", "sejda", "watermark", "eval"]):
+                            r = fitz.Rect(block["bbox"])
+                            flagged_rects.append((r, "Editor String"))
+                            page_flagged = True
+                            audit["is_tampered"] = True
+                            audit["risk_score"] += 60
 
-                # Check if multi-save or foreign fonts are active; if so, flag words adjacent to critical labels
-                text_blocks = page.get_text("blocks")
-                for block in text_blocks:
-                    block_text = block[4].strip()
-                    block_rect = fitz.Rect(block[:4])
-                    
-                    # 1. External tool watermarks or text indicators
-                    if any(t in block_text.lower() for t in ["ilovepdf", "smallpdf", "pdfescape", "sejda", "watermark", "eval"]):
-                        page_flagged = True
-                        audit["is_tampered"] = True
-                        audit["risk_score"] += 60
-                        audit["tamper_evidence"].append(f"Page {page_num + 1}: Injected text block '{block_text}'.")
-                        page.draw_rect(block_rect, color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.3, width=2.5)
+                        for line in block["lines"]:
+                            for span in line["spans"]:
+                                span_text = span["text"].strip()
+                                span_font = span["font"]
+                                span_rect = fitz.Rect(span["bbox"])
 
-                    # 2. Altered Values near Critical Fields in a multi-save/tampered file
-                    if (has_incremental_saves or has_font_anomalies) and len(block_text.split()) <= 4:
-                        # If a short standalone text box sits directly near a sensitive label
-                        for s_box in sensitive_boxes:
-                            # Horizontal proximity within 250px and vertical alignment within 15px
-                            if 0 <= (block_rect.x0 - s_box.x1) < 250 and abs(block_rect.y0 - s_box.y0) < 15:
-                                # High likelihood this is an overlaid modified value
-                                page_flagged = True
-                                audit["is_tampered"] = True
-                                page.draw_rect(block_rect, color=(1, 0.2, 0), fill=(1, 0.5, 0), fill_opacity=0.25, width=2)
-                                audit["tamper_evidence"].append(
-                                    f"Page {page_num + 1}: Suspicious overlay near field label: '{block_text}'"
-                                )
-                                break
+                                # Skip trivial single characters or spaces
+                                if len(span_text) < 2:
+                                    continue
 
-                # Render page to high-res PNG
+                                # Signal A: Font subset mismatch (text written in a different font than the body)
+                                is_outlier_font = (span_font not in dominant_fonts) and len(dominant_fonts) > 0
+                                is_suspicious_font_name = any(s in span_font.lower() for s in ["identity-h", "custom", "arial", "libertine"])
+
+                                # Signal B: Late added block in multi-save container
+                                is_late_block = has_incremental_saves and (b_idx > len(blocks) * 0.7) and len(span_text.split()) <= 4
+
+                                if (is_outlier_font and is_suspicious_font_name) or is_late_block:
+                                    # Check if this text sits in or near sensitive notice areas
+                                    sensitive_match = bool(re.search(r'(\d{2}/\d{2}/\d{4}|\b[A-Z0-9]{10,13}\b|h-?1b|class|valid|petitioner)', span_text, re.IGNORECASE))
+                                    if sensitive_match or is_late_block:
+                                        flagged_rects.append((span_rect, f"Altered: {span_text[:18]}"))
+                                        page_flagged = True
+                                        audit["is_tampered"] = True
+                                        audit["risk_score"] += 25
+
+                # --- SIGNAL 3: RENDER VISIBLE HIGHLIGHTS ON PAGE ---
+                for r, reason in flagged_rects:
+                    audit["flagged_regions_count"] += 1
+                    # Draw bright red box with translucent fill
+                    page.draw_rect(r, color=(1, 0, 0), fill=(1, 0, 0), fill_opacity=0.32, width=2.5)
+                    # Add small visible badge above the block
+                    page.insert_text((r.x0, max(r.y0 - 2, 8)), "[MODIFIED]", fontsize=6.5, color=(0.85, 0, 0))
+
                 pix = page.get_pixmap(dpi=150)
                 audit["redlined_images"].append((page_num + 1, pix.tobytes("png"), page_flagged))
-
-            # Audit font consistency across the entire document
-            unique_fonts = list(set(all_page_fonts))
-            suspicious_fonts = [f for f in unique_fonts if any(s in f.lower() for s in ["identity-h", "custom", "arialmt", "libertine"])]
-            if len(suspicious_fonts) > 1 and has_incremental_saves:
-                audit["risk_score"] += 30
-                audit["tamper_evidence"].append(
-                    f"Typographic Font Discrepancy: Non-standard fonts [{', '.join(suspicious_fonts[:2])}] found alongside standard USCIS typography."
-                )
 
         except Exception as e:
             audit["tamper_evidence"].append(f"Audit Interruption: {str(e)}")
 
-        if audit["risk_score"] >= 45 or audit["inferred_tool"] != "None Detected":
+        if audit["risk_score"] >= 45 or audit["inferred_tool"] != "None Detected" or audit["flagged_regions_count"] > 0:
             audit["is_tampered"] = True
 
         return audit
@@ -236,27 +236,28 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
     if h1b_file is not None:
         file_bytes = h1b_file.read()
         
-        with st.spinner("Analyzing Form I-797 layout, typography, and USCIS receipt structure..."):
+        with st.spinner("Executing deep coordinate & font span inspection on Form I-797..."):
             result = audit_h1b_copy(file_bytes)
             
         st.write("")
         
+        # Threat Verdict Banner
         if result["is_tampered"]:
             st.error(
                 f"🚨 **H-1B VERDICT: CRITICAL RED FLAG (TAMPERING DETECTED)** \n\n"
-                f"Tamper Confidence Score: {min(result['risk_score'], 100)}/100 — Document shows structural, typographic, or visual mask alterations.",
+                f"Found {result['flagged_regions_count']} visual overlay/font anomalies. Threat Confidence: {min(result['risk_score'], 100)}/100.",
                 icon="🛑"
             )
         elif result["risk_score"] > 20:
             st.warning(
                 f"⚠️ **H-1B VERDICT: CAUTION (INCONSISTENCIES FOUND)** \n\n"
-                f"Risk Score: {result['risk_score']}/100 — Multi-save or layout deviations found. Review redlined zones.",
+                f"Risk Score: {result['risk_score']}/100 — Multi-save trace found. Manual verification recommended.",
                 icon="⚡"
             )
         else:
             st.success(
                 "🛡️ **H-1B VERDICT: STRUCTURALLY CLEAN / VERIFIED SCAN** \n\n"
-                "Document matches single-compilation structure with no external editing tool overlays or white-out masks detected.",
+                "Document typography is uniform with no secondary text layers, font overrides, or white-out masks detected.",
                 icon="✅"
             )
 
@@ -270,20 +271,20 @@ if app_mode == "🛂 H-1B (I-797) Tamper & Fraud Detector":
             st.markdown("**Validity Window**")
             st.info(result["validity_dates"] if result["validity_dates"] != "Not Isolated" else "Dates Not Extracted")
         with col3:
-            st.markdown("**Tool / Modification Profile**")
+            st.markdown("**Modification Tool Profile**")
             if result["inferred_tool"] != "None Detected":
-                st.error(f"Tool Trapped: {result['inferred_tool']}")
+                st.error(f"Tool Detected: {result['inferred_tool']}")
             else:
-                st.success("No Editing Software Signature")
+                st.success("No Editing Software Footprint")
 
         st.markdown("---")
         st.subheader("🎯 Visual Overlay & Coordinates Inspection")
-        st.caption("Red/Orange highlighted regions mark detected white-out rectangles, injected text layers, or modified value blocks.")
+        st.caption("Altered spans, font discrepancies, and white-out masks are highlighted directly with red boxes and [MODIFIED] tags.")
         
         cols = st.columns(min(len(result["redlined_images"]), 2))
         for idx, (p_num, img_b, is_flagged) in enumerate(result["redlined_images"]):
             with cols[idx % 2]:
-                caption = f"Page {p_num} {'(🚨 Overlays Flagged)' if is_flagged else '(Clean Document Grid)'}"
+                caption = f"Page {p_num} {'(🚨 Tampering Highlights Visible)' if is_flagged else '(Clean Document Grid)'}"
                 st.image(img_b, caption=caption, use_container_width=True)
 
         st.markdown("---")
