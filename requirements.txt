@@ -2,3 +2,5 @@ streamlit
 pypdf
 python-docx
 pymupdf
+pillow
+numpy
